@@ -15,14 +15,25 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-
 #pragma once
-#ifndef TTY_H__
-#define TTY_H__
+#ifndef NCURSES_AND_READLINE_H__
+#define NCURSES_AND_READLINE_H__
 
+#include <pthread.h>
 #include <usefull_macros.h>
 
-int Read_tty(TTY_descr *d);
-void settimeout(int tms);
+typedef struct{
+    TTY_descr *dev;
+    pthread_mutex_t mutex;
+    char eol[3];
+    int eollen;
+} ttyd;
 
-#endif // TTY_H__
+void init_readline();
+void deinit_readline();
+void init_ncurses();
+void deinit_ncurses();
+void *cmdline(void* arg);
+void add_ttydata(const char *text);
+
+#endif // NCURSES_AND_READLINE_H__

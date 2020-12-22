@@ -20,78 +20,43 @@
 #include <sys/select.h>
 #include "tty.h"
 
-/**
- * @brief read_ttyX- read data from TTY & console with 1ms timeout WITH disconnect detection
- * @param buff (o) - buffer for data read
- * @param length   - buffer len
- * @param rb (o)   - byte read from console or -1
- * @return amount of bytes read on tty or -1 if disconnected
- */
-int read_ttyX(TTY_descr *d, int *rb){
-    if(!d || d->comfd < 0) return -1;
-    ssize_t L = 0;
+static int sec = 0, usec = 100; // timeout
+
+void settimeout(int tmout){
+    sec = 0;
+    if(tmout > 999){
+        sec = tmout / 1000;
+        tmout -= sec * 1000;
+    }
+    usec = tmout * 1000L;
+}
+
+int Read_tty(TTY_descr *d){
+    if(d->comfd < 0) return 0;
+    size_t L = 0;
+    ssize_t l;
+    size_t length = d->bufsz;
+    char *ptr = d->buf;
     fd_set rfds;
     struct timeval tv;
     int retval;
-    if(rb) *rb = -1;
-    FD_ZERO(&rfds);
-    FD_SET(STDIN_FILENO, &rfds);
-    FD_SET(d->comfd, &rfds);
-    // wait for 1ms
-    tv.tv_sec = 0; tv.tv_usec = 1000;
-    retval = select(d->comfd + 1, &rfds, NULL, NULL, &tv);
-    if(!retval) return 0;
-    if(retval < 0){
-        WARN("select()");
-        return -1;
-    }
-    if(FD_ISSET(STDIN_FILENO, &rfds) && rb){
-        *rb = getchar();
-    }
-    if(FD_ISSET(d->comfd, &rfds)){
-        if((L = read(d->comfd, d->buf, d->bufsz)) < 1){
-            WARN("read()");
-            return -1; // disconnect or other error - close TTY & die
+    do{
+        l = 0;
+        FD_ZERO(&rfds);
+        FD_SET(d->comfd, &rfds);
+        tv.tv_sec = sec; tv.tv_usec = usec;
+        retval = select(d->comfd + 1, &rfds, NULL, NULL, &tv);
+        if (!retval) break;
+        if(FD_ISSET(d->comfd, &rfds)){
+            l = read(d->comfd, ptr, length);
+            if(l < 0) return -1;
+            if(l == 0) break;
+            ptr += l; L += l;
+            length -= l;
         }
-    }
-    d->buflen = (size_t)L;
+    }while(l && length);
+    d->buflen = L;
     d->buf[L] = 0;
     return (int)L;
 }
 
-
-#if 0
-/**
- * Copy line by line buffer buff to file removing cmd starting from newline
- * @param buffer - data to put into file
- * @param cmd - symbol to remove from line startint (if found, change *cmd to (-1)
- *          or NULL, (-1) if no command to remove
- */
-void copy_buf_to_file(char *buffer, int *cmd){
-    char *buff, *line, *ptr;
-    if(!cmd || *cmd < 0){
-        fprintf(fout, "%s", buffer);
-        return;
-    }
-    buff = strdup(buffer), ptr = buff;
-    do{
-        if(!*ptr) break;
-        if(ptr[0] == (char)*cmd){
-            *cmd = -1;
-            ptr++;
-            if(ptr[0] == '\n') ptr++;
-            if(!*ptr) break;
-        }
-        line = ptr;
-        ptr = strchr(buff, '\n');
-        if(ptr){
-            *ptr++ = 0;
-            fprintf(fout, "%s\n", line);
-        }else
-            fprintf(fout, "%s", line); // no newline found in buffer
-//      fprintf(fout, "%s\n", line);
-    }while(ptr);
-    free(buff);
-}
-
-#endif

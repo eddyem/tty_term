@@ -35,6 +35,7 @@ glob_pars const Gdefault = {
     .speed = 9600,
     .ttyname = "/dev/ttyUSB0",
     .eol = "n",
+    .tmoutms = 100,
 };
 
 /*
@@ -46,7 +47,8 @@ static myoption cmdlnopts[] = {
     {"help",    NO_ARGS,    NULL,   'h',    arg_int,    APTR(&help),        _("show this help")},
     {"speed",   NEED_ARG,   NULL,   's',    arg_int,    APTR(&G.speed),     _("baudrate (default: 9600)")},
     {"devname", NEED_ARG,   NULL,   'd',    arg_string, APTR(&G.ttyname),   _("serial device name")},
-    {"eol",     NEED_ARG,   NULL,   'e',    arg_string, APTR(&G.eol),       _("end of line: n, r or rn")},
+    {"eol",     NEED_ARG,   NULL,   'e',    arg_string, APTR(&G.eol),       _("end of line: n (default), r, nr or rn")},
+    {"timeout", NEED_ARG,   NULL,   't',    arg_int,    APTR(&G.tmoutms),   _("timeout for select() in ms (default: 100)")},
     end_option
 };
 

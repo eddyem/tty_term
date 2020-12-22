@@ -25,6 +25,7 @@
  */
 typedef struct{
     int speed;          // baudrate
+    int tmoutms;        // timeout for select() in ms
     char *ttyname;      // device name
     char *eol;          // end of line: \r (CR), \rn (CR+LF) or \n (LF): "r", "rn", "n"
 } glob_pars;

@@ -21,61 +21,72 @@
 #include <string.h> // strcmp
 #include <usefull_macros.h>
 #include "cmdlnopts.h"
+#include "ncurses_and_readline.h"
 #include "tty.h"
 
-// we don't need more than 64 bytes for TTY input buffer - USB CDC can't transmit more in one packet
-#define BUFLEN 65
+#define BUFLEN 4096
 
-static TTY_descr *dev = NULL;
+static ttyd dtty = {.dev = NULL, .mutex = PTHREAD_MUTEX_INITIALIZER};
 
 void signals(int signo){
-    restore_console();
-    if(dev) close_tty(&dev);
+    if(dtty.dev){
+        pthread_mutex_lock(&dtty.mutex);
+        close_tty(&dtty.dev);
+    }
+    deinit_ncurses();
+    deinit_readline();
     exit(signo);
 }
-
-typedef enum{
-    EOL_N = 0,
-    EOL_R,
-    EOL_RN
-} eol_t;
 
 int main(int argc, char **argv){
     glob_pars *G = NULL; // default parameters see in cmdlnopts.c
     initial_setup();
     G = parse_args(argc, argv);
-    dev = new_tty(G->ttyname, G->speed, BUFLEN);
-    if(!dev || !(dev = tty_open(dev, 1))) return 1; // open exclusively
-    eol_t eol = EOL_N;
-    if(strcmp(G->eol, "n")){ // change eol
-        if(strcmp(G->eol, "r") == 0) eol = EOL_R;
-        else if(strcmp(G->eol, "rn") == 0) eol = EOL_RN;
-        else ERRX("End of line should be \"r\", \"n\" or \"rn\"");
+    if(G->tmoutms < 0) ERRX("Timeout should be >= 0");
+    dtty.dev = new_tty(G->ttyname, G->speed, BUFLEN);
+    if(!dtty.dev || !(dtty.dev = tty_open(dtty.dev, 1))){
+        WARN("Can't open device %s", G->ttyname);
+        signals(1);
     }
+    init_ncurses();
+    init_readline();
+    const char *EOL = "\n";
+    if(strcasecmp(G->eol, "n")){
+        if(strcasecmp(G->eol, "r") == 0) EOL = "\r";
+        else if(strcasecmp(G->eol, "rn") == 0) EOL = "\r\n";
+        else if(strcasecmp(G->eol, "nr") == 0) EOL = "\n\r";
+        else ERRX("End of line should be \"r\", \"n\" or \"rn\" or \"nr\"");
+    }
+    strcpy(dtty.eol, EOL);
+    int eollen = strlen(EOL);
+    dtty.eollen = eollen;
     signal(SIGTERM, signals); // kill (-15) - quit
     signal(SIGHUP, signals);  // hup - quit
     signal(SIGINT, signals);  // ctrl+C - quit
     signal(SIGQUIT, signals); // ctrl+\ - quit
     signal(SIGTSTP, SIG_IGN); // ignore ctrl+Z
-    setup_con();
-    const char r = '\r';
+    pthread_t writer;
+    if(pthread_create(&writer, NULL, cmdline, (void*)&dtty)) ERR("pthread_create()");
+    settimeout(G->tmoutms);
     while(1){
-        int b;
-        int l = read_ttyX(dev, &b);
-        if(l < 0) signals(9);
-        if(b > -1){
-            char c = (char)b;
-            if(c == '\n' && eol != EOL_N){ // !\n
-                if(eol == EOL_R) c = '\r'; // \r
-                else if(write_tty(dev->comfd, &r, 1)) WARN("write_tty()"); // \r\n
-            }
-            if(write_tty(dev->comfd, &c, 1)) WARN("write_tty()");
-        }
-        if(l){
-            printf("%s", dev->buf);
-            fflush(stdout);
-           // if(fout) copy_buf_to_file(buff, &oldcmd);
-        }
+        //if(0 == pthread_mutex_lock(&dtty.mutex)){
+            int l = Read_tty(dtty.dev);
+            if(l){
+                char *buf = dtty.dev->buf;
+                char *eol = NULL, *estr = buf + l;
+                do{
+                    eol = strstr(buf, EOL);
+                    if(eol){
+                        *eol = 0;
+                        add_ttydata(buf);
+                        buf = eol + eollen;
+                    }else{
+                        add_ttydata(buf);
+                    }
+                }while(eol && buf < estr);
+            }else if(l < 0) signals(9);
+          //  pthread_mutex_unlock(&dtty.mutex);
+        //}
     }
     // never reached
     return 0;

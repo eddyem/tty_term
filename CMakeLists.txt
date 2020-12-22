@@ -33,11 +33,22 @@ endif()
 
 ###### pkgconfig ######
 # pkg-config modules (for pkg-check-modules)
-set(MODULES usefull_macros)
+set(MODULES ncurses readline usefull_macros)
 
 # find packages:
 find_package(PkgConfig REQUIRED)
+find_package(Threads REQUIRED)
 pkg_check_modules(${PROJ} REQUIRED ${MODULES})
+
+find_package(Threads REQUIRED)
+if(THREADS_HAVE_PTHREAD_ARG)
+  set_property(TARGET ${PROJ} PROPERTY COMPILE_OPTIONS "-pthread")
+  set_property(TARGET ${PROJ} PROPERTY INTERFACE_COMPILE_OPTIONS "-pthread")
+endif()
+if(CMAKE_THREAD_LIBS_INIT)
+  list(APPEND ${PROJ}_LIBRARIES "${CMAKE_THREAD_LIBS_INIT}")
+endif()
+
 
 ###### additional flags ######
 #list(APPEND ${PROJ}_LIBRARIES "-lfftw3_threads")
