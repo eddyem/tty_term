@@ -103,6 +103,7 @@ static void msg_win_redisplay(bool for_resize){
         }else{ // put only first part
             int rest = LINES-2 - nlines;
             waddnstr(msg_win, buf, rest *COLS);
+            free(buf);
             break;
         }
         free(buf);
@@ -135,8 +136,8 @@ static void readline_redisplay(){
 
 static void show_mode(bool for_resize){
     wclear(sep_win);
-    if(insert_mode) waddstr(sep_win, "INSERT (TAB to switch, ctrl+D to quit)");
-    else waddstr(sep_win, "SCROLL (TAB to switch, q to quit)");
+    if(insert_mode) wprintw(sep_win, "INSERT (TAB to switch, ctrl+D to quit) ENDLINE: %s", dtty?dtty->seol:"n");
+    else wprintw(sep_win, "SCROLL (TAB to switch, q to quit) ENDLINE: %s", dtty?dtty->seol:"n");
     if(for_resize) wnoutrefresh(sep_win);
     else wrefresh(sep_win);
     cmd_win_redisplay(for_resize);
@@ -278,6 +279,7 @@ static void rollup(){
 void *cmdline(void* arg){
     MEVENT event;
     dtty = (ttyd*)arg;
+    show_mode(false);
     do{
         int c = wgetch(cmd_win);
         bool processed = true;

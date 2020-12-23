@@ -54,16 +54,15 @@ int main(int argc, char **argv){
     }
     //fd = fopen("loglog", "w");
     //fprintf(fd, "start\n");
-    init_ncurses();
-    init_readline();
-    const char *EOL = "\n";
+    const char *EOL = "\n", *seol = "\\n";
     if(strcasecmp(G->eol, "n")){
-        if(strcasecmp(G->eol, "r") == 0) EOL = "\r";
-        else if(strcasecmp(G->eol, "rn") == 0) EOL = "\r\n";
-        else if(strcasecmp(G->eol, "nr") == 0) EOL = "\n\r";
+        if(strcasecmp(G->eol, "r") == 0){ EOL = "\r"; seol = "\\r"; }
+        else if(strcasecmp(G->eol, "rn") == 0){ EOL = "\r\n"; seol = "\\r\\n"; }
+        else if(strcasecmp(G->eol, "nr") == 0){ EOL = "\n\r"; seol = "\\n\\r"; }
         else ERRX("End of line should be \"r\", \"n\" or \"rn\" or \"nr\"");
     }
     strcpy(dtty.eol, EOL);
+    strcpy(dtty.seol, seol);
     int eollen = strlen(EOL);
     dtty.eollen = eollen;
     signal(SIGTERM, signals); // kill (-15) - quit
@@ -71,6 +70,8 @@ int main(int argc, char **argv){
     signal(SIGINT, signals);  // ctrl+C - quit
     signal(SIGQUIT, signals); // ctrl+\ - quit
     signal(SIGTSTP, SIG_IGN); // ignore ctrl+Z
+    init_ncurses();
+    init_readline();
     pthread_t writer;
     if(pthread_create(&writer, NULL, cmdline, (void*)&dtty)) ERR("pthread_create()");
     settimeout(G->tmoutms);
@@ -81,14 +82,27 @@ int main(int argc, char **argv){
                 char *buf = dtty.dev->buf;
                 char *eol = NULL, *estr = buf + l;
                 do{
-                    eol = strstr(buf, EOL);
+                    eol = strchr(buf, '\n');
+                    if(eol){
+                        *eol = 0;
+                        add_ttydata(buf);
+                        buf = eol + 1;
+                    }else{
+                        add_ttydata(buf);
+                    }
+                    /*eol = strstr(buf, EOL);
                     if(eol){
                         *eol = 0;
                         add_ttydata(buf);
                         buf = eol + eollen;
                     }else{
+                        char *ptr = buf;
+                        while(*ptr){
+                            if(*ptr == '\n' || *ptr == '\r'){ *ptr = 0; break;}
+                            ++ptr;
+                        }
                         add_ttydata(buf);
-                    }
+                    }*/
                 }while(eol && buf < estr);
             }else if(l < 0){
                 pthread_mutex_unlock(&dtty.mutex);

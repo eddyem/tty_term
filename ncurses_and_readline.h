@@ -26,6 +26,7 @@ typedef struct{
     TTY_descr *dev;
     pthread_mutex_t mutex;
     char eol[3];
+    char seol[5];
     int eollen;
 } ttyd;
 
