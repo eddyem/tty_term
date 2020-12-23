@@ -31,8 +31,10 @@ void settimeout(int tmout){
     usec = tmout * 1000L;
 }
 
+//extern FILE *fd;
+
 int Read_tty(TTY_descr *d){
-    if(d->comfd < 0) return 0;
+    if(!d || d->comfd < 0) return 0;
     size_t L = 0;
     ssize_t l;
     size_t length = d->bufsz;
@@ -46,11 +48,11 @@ int Read_tty(TTY_descr *d){
         FD_SET(d->comfd, &rfds);
         tv.tv_sec = sec; tv.tv_usec = usec;
         retval = select(d->comfd + 1, &rfds, NULL, NULL, &tv);
-        if (!retval) break;
+        if(!retval) break;
+        if(retval < 0) return -1;
         if(FD_ISSET(d->comfd, &rfds)){
             l = read(d->comfd, ptr, length);
-            if(l < 0) return -1;
-            if(l == 0) break;
+            if(l < 1) return -1; // disconnected
             ptr += l; L += l;
             length -= l;
         }

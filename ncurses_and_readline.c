@@ -112,32 +112,6 @@ static void msg_win_redisplay(bool for_resize){
     else wrefresh(msg_win);
 }
 
-void add_ttydata(const char *text){
-    if(!text) return;
-    if(!*text) text = " "; // empty string
-    Line *lp = malloc(sizeof(Line));
-    lp->contents = strdup(text);
-    lp->prev = curr;
-    lp->next = NULL;
-    lp->Nline = nr_lines++;
-    if(!curr || !head){
-        head = curr = firstline = lp;
-    }else
-        curr->next = lp;
-    curr = lp;
-    // roll back to show last input
-    if(curr->prev){
-        firstline = curr;
-        int totalln = (strlen(firstline->contents) - 1)/COLS + 1;
-        while(firstline->prev){
-            totalln += (strlen(firstline->prev->contents) - 1)/COLS + 1;
-            if(totalln > LINES-2) break;
-            firstline = firstline->prev;
-        }
-    }
-    msg_win_redisplay(false);
-}
-
 static void cmd_win_redisplay(bool for_resize){
     int cursor_col = 2 + rl_point; // "> " width is 2
     werase(cmd_win);
@@ -166,6 +140,34 @@ static void show_mode(bool for_resize){
     if(for_resize) wnoutrefresh(sep_win);
     else wrefresh(sep_win);
     cmd_win_redisplay(for_resize);
+}
+
+void add_ttydata(const char *text){
+    if(!text) return;
+    if(!*text) text = " "; // empty string
+    Line *lp = malloc(sizeof(Line));
+    lp->contents = strdup(text);
+    lp->prev = curr;
+    lp->next = NULL;
+    lp->Nline = nr_lines++;
+    if(!curr || !head){
+        head = curr = firstline = lp;
+    }else
+        curr->next = lp;
+    curr = lp;
+    // roll back to show last input
+    if(curr->prev){
+        firstline = curr;
+        int totalln = (strlen(firstline->contents) - 1)/COLS + 1;
+        while(firstline->prev){
+            totalln += (strlen(firstline->prev->contents) - 1)/COLS + 1;
+            if(totalln > LINES-2) break;
+            firstline = firstline->prev;
+        }
+    }
+    msg_win_redisplay(true);
+    show_mode(true);
+    doupdate();
 }
 
 static void resize(){
@@ -217,26 +219,27 @@ void init_ncurses(){
 }
 
 void deinit_ncurses(){
+    visual_mode = false;
     delwin(msg_win);
     delwin(sep_win);
     delwin(cmd_win);
     endwin();
-    visual_mode = false;
 }
 
 static void got_command(char *line){
+    bool err = false;
     if(!line) // Ctrl-D pressed on empty line
         should_exit = true;
     else{
         if(!*line) return; // zero length
         add_history(line);
         if(dtty && dtty->dev){
-
-            //if(0 == pthread_mutex_lock(&dtty->mutex)){
-                if(write_tty(dtty->dev->comfd, line, strlen(line))) signals(9);
-                if(write_tty(dtty->dev->comfd, dtty->eol, dtty->eollen)) signals(9);
-               // pthread_mutex_unlock(&dtty->mutex);
-            //}
+            if(0 == pthread_mutex_lock(&dtty->mutex)){
+                if(write_tty(dtty->dev->comfd, line, strlen(line))) err = true;
+                else if(write_tty(dtty->dev->comfd, dtty->eol, dtty->eollen)) err = true;
+                pthread_mutex_unlock(&dtty->mutex);
+                if(err) ERRX("Device disconnected");
+            }
         }
         free(line);
     }
@@ -289,6 +292,8 @@ void *cmdline(void* arg){
                 keypad(cmd_win, insert_mode); // enable/disable reaction @ special characters
                 insert_mode = !insert_mode;
                 show_mode(false);
+                if(insert_mode) curs_set(2);
+                else curs_set(0);
             break;
             case KEY_RESIZE:
                 resize();

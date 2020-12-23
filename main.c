@@ -28,11 +28,15 @@
 
 static ttyd dtty = {.dev = NULL, .mutex = PTHREAD_MUTEX_INITIALIZER};
 
+//FILE *fd;
+
 void signals(int signo){
     if(dtty.dev){
         pthread_mutex_lock(&dtty.mutex);
         close_tty(&dtty.dev);
     }
+    //fprintf(fd, "stop\n");
+    //fflush(fd);
     deinit_ncurses();
     deinit_readline();
     exit(signo);
@@ -48,6 +52,8 @@ int main(int argc, char **argv){
         WARN("Can't open device %s", G->ttyname);
         signals(1);
     }
+    //fd = fopen("loglog", "w");
+    //fprintf(fd, "start\n");
     init_ncurses();
     init_readline();
     const char *EOL = "\n";
@@ -69,9 +75,9 @@ int main(int argc, char **argv){
     if(pthread_create(&writer, NULL, cmdline, (void*)&dtty)) ERR("pthread_create()");
     settimeout(G->tmoutms);
     while(1){
-        //if(0 == pthread_mutex_lock(&dtty.mutex)){
+        if(0 == pthread_mutex_lock(&dtty.mutex)){
             int l = Read_tty(dtty.dev);
-            if(l){
+            if(l > 0){
                 char *buf = dtty.dev->buf;
                 char *eol = NULL, *estr = buf + l;
                 do{
@@ -84,9 +90,13 @@ int main(int argc, char **argv){
                         add_ttydata(buf);
                     }
                 }while(eol && buf < estr);
-            }else if(l < 0) signals(9);
-          //  pthread_mutex_unlock(&dtty.mutex);
-        //}
+            }else if(l < 0){
+                pthread_mutex_unlock(&dtty.mutex);
+                ERRX("Device disconnected");
+            }
+            pthread_mutex_unlock(&dtty.mutex);
+            usleep(1000);
+        }
     }
     // never reached
     return 0;
