@@ -49,7 +49,10 @@ int Read_tty(TTY_descr *d){
         tv.tv_sec = sec; tv.tv_usec = usec;
         retval = select(d->comfd + 1, &rfds, NULL, NULL, &tv);
         if(!retval) break;
-        if(retval < 0) return -1;
+        if(retval < 0){
+            if(errno == EINTR) continue;
+            return -1;
+        }
         if(FD_ISSET(d->comfd, &rfds)){
             l = read(d->comfd, ptr, length);
             if(l < 1) return -1; // disconnected
