@@ -32,8 +32,10 @@ static ttyd dtty = {.dev = NULL, .mutex = PTHREAD_MUTEX_INITIALIZER};
 
 void signals(int signo){
     if(dtty.dev){
-        pthread_mutex_lock(&dtty.mutex);
+        pthread_mutex_unlock(&dtty.mutex);
+        pthread_mutex_trylock(&dtty.mutex);
         close_tty(&dtty.dev);
+        pthread_mutex_unlock(&dtty.mutex);
     }
     //fprintf(fd, "stop\n");
     //fflush(fd);
