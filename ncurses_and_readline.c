@@ -136,8 +136,8 @@ static void readline_redisplay(){
 
 static void show_mode(bool for_resize){
     wclear(sep_win);
-    if(insert_mode) wprintw(sep_win, "INSERT (TAB to switch, ctrl+D to quit) ENDLINE: %s", dtty?dtty->seol:"n");
-    else wprintw(sep_win, "SCROLL (TAB to switch, q to quit) ENDLINE: %s", dtty?dtty->seol:"n");
+    if(insert_mode) wprintw(sep_win, "INSERT (TAB to switch, ctrl+D to quit) ENDLINE: %s SPEED: %d", dtty?dtty->seol:"n", dtty?dtty->dev->speed:"NC");
+    else wprintw(sep_win, "SCROLL (TAB to switch, q to quit) ENDLINE: %s SPEED: %d", dtty?dtty->seol:"n", dtty?dtty->dev->speed:"NC");
     if(for_resize) wnoutrefresh(sep_win);
     else wrefresh(sep_win);
     cmd_win_redisplay(for_resize);
