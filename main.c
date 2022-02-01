@@ -19,43 +19,31 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h> // strcmp
-#include <usefull_macros.h>
 #include "cmdlnopts.h"
 #include "ncurses_and_readline.h"
-#include "tty.h"
+#include "ttysocket.h"
 
-#define BUFLEN 4096
+#include "dbg.h"
 
-static ttyd dtty = {.dev = NULL, .mutex = PTHREAD_MUTEX_INITIALIZER};
-
-//FILE *fd;
+static chardevice conndev = {.dev = NULL, .mutex = PTHREAD_MUTEX_INITIALIZER, .name = NULL, .type = DEV_TTY};
 
 void signals(int signo){
     signal(signo, SIG_IGN);
-    if(dtty.dev){
-        pthread_mutex_unlock(&dtty.mutex);
-        pthread_mutex_trylock(&dtty.mutex);
-        close_tty(&dtty.dev);
-    }
-    //fprintf(fd, "stop\n");
-    //fflush(fd);
+    closedev(&conndev);
     deinit_ncurses();
     deinit_readline();
+    DBG("Exit");
     exit(signo);
 }
 
 int main(int argc, char **argv){
     glob_pars *G = NULL; // default parameters see in cmdlnopts.c
     initial_setup();
+#ifdef EBUG
+    OPENLOG("debug.log", LOGLEVEL_ANY, 1);
+#endif
     G = parse_args(argc, argv);
     if(G->tmoutms < 0) ERRX("Timeout should be >= 0");
-    dtty.dev = new_tty(G->ttyname, G->speed, BUFLEN);
-    if(!dtty.dev || !(dtty.dev = tty_open(dtty.dev, 1))){
-        WARN("Can't open device %s", G->ttyname);
-        signals(1);
-    }
-    //fd = fopen("loglog", "w");
-    //fprintf(fd, "start\n");
     const char *EOL = "\n", *seol = "\\n";
     if(strcasecmp(G->eol, "n")){
         if(strcasecmp(G->eol, "r") == 0){ EOL = "\r"; seol = "\\r"; }
@@ -63,10 +51,27 @@ int main(int argc, char **argv){
         else if(strcasecmp(G->eol, "nr") == 0){ EOL = "\n\r"; seol = "\\n\\r"; }
         else ERRX("End of line should be \"r\", \"n\" or \"rn\" or \"nr\"");
     }
-    strcpy(dtty.eol, EOL);
-    strcpy(dtty.seol, seol);
+    strcpy(conndev.eol, EOL);
+    strcpy(conndev.seol, seol);
     int eollen = strlen(EOL);
-    dtty.eollen = eollen;
+    conndev.eollen = eollen;
+    DBG("eol: %s, seol: %s", conndev.eol, conndev.seol);
+    if(!G->ttyname){
+        WARNX("You should point name");
+        signals(0);
+    }
+    conndev.name = strdup(G->ttyname);
+    conndev.speed = G->speed;
+    if(G->socket){
+        if(!G->port) conndev.type = DEV_UNIXSOCKET;
+        else{
+            conndev.type = DEV_NETSOCKET;
+            conndev.port = strdup(G->port);
+        }
+    }
+    if(!opendev(&conndev, G->dumpfile)){
+        signals(0);
+    }
     init_ncurses();
     init_readline();
     signal(SIGTERM, signals); // kill (-15) - quit
@@ -75,42 +80,29 @@ int main(int argc, char **argv){
     signal(SIGQUIT, signals); // ctrl+\ - quit
     signal(SIGTSTP, SIG_IGN); // ignore ctrl+Z
     pthread_t writer;
-    if(pthread_create(&writer, NULL, cmdline, (void*)&dtty)) ERR("pthread_create()");
+    if(pthread_create(&writer, NULL, cmdline, (void*)&conndev)) ERR("pthread_create()");
     settimeout(G->tmoutms);
     while(1){
-        if(0 == pthread_mutex_lock(&dtty.mutex)){
-            int l = Read_tty(dtty.dev);
-            if(l > 0){
-                char *buf = dtty.dev->buf;
+        if(0 == pthread_mutex_lock(&conndev.mutex)){
+            int l;
+            char *buf = ReadData(&conndev, &l);
+            if(buf && l > 0){
                 char *eol = NULL, *estr = buf + l;
                 do{
-                    /*eol = strchr(buf, '\n');
-                    if(eol){
-                        *eol = 0;
-                        add_ttydata(buf);
-                        buf = eol + 1;
-                    }else{
-                        add_ttydata(buf);
-                    }*/
                     eol = strstr(buf, EOL);
                     if(eol){
                         *eol = 0;
-                        add_ttydata(buf);
+                        ShowData(buf);
                         buf = eol + eollen;
                     }else{
-                       /* char *ptr = buf;
-                        while(*ptr){
-                            if(*ptr == '\n' || *ptr == '\r'){ *ptr = 0; break;}
-                            ++ptr;
-                        }*/
-                        add_ttydata(buf);
+                        ShowData(buf);
                     }
                 }while(eol && buf < estr);
             }else if(l < 0){
-                pthread_mutex_unlock(&dtty.mutex);
+                pthread_mutex_unlock(&conndev.mutex);
                 ERRX("Device disconnected");
             }
-            pthread_mutex_unlock(&dtty.mutex);
+            pthread_mutex_unlock(&conndev.mutex);
             usleep(1000);
         }
     }

@@ -1,6 +1,6 @@
 /*
  * This file is part of the ttyterm project.
- * Copyright 2020 Edward V. Emelianov <edward.emelianoff@gmail.com>.
+ * Copyright 2022 Edward V. Emelianov <edward.emelianoff@gmail.com>.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,18 +15,27 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+
 #pragma once
-#ifndef NCURSES_AND_READLINE_H__
-#define NCURSES_AND_READLINE_H__
+#ifndef DBG_H__
+#define DBG_H__
 
-#include "dbg.h"
-#include "ttysocket.h"
+#include <usefull_macros.h>
 
-void init_readline();
-void deinit_readline();
-void init_ncurses();
-void deinit_ncurses();
-void *cmdline(void* arg);
-void ShowData(const char *text);
+#ifdef EBUG
+#undef DBG
+#undef FNAME
+#undef ERR
+#undef ERRX
+//#undef WARN
+#undef WARNX
+#define FNAME() do{LOGDBG("%s (%s, line %d)", __func__, __FILE__, __LINE__);}while(0)
+#define DBG(...) do{LOGDBG("%s (%s, line %d):", __func__, __FILE__, __LINE__); \
+                  LOGDBGADD(__VA_ARGS__);} while(0)
+#define ERR(...) do{LOGERR(__VA_ARGS__); signals(9);}while(0)
+#define ERRX(...) do{LOGERR(__VA_ARGS__); signals(9);}while(0)
+//#define WARN(...) do{LOGWARN(__VA_ARGS__);}while(0)
+#define WARNX(...) do{LOGWARN(__VA_ARGS__);}while(0)
+#endif
 
-#endif // NCURSES_AND_READLINE_H__
+#endif // DBG_H__

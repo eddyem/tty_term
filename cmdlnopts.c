@@ -20,8 +20,9 @@
 #include <assert.h> // assert
 #include <stdio.h>  // printf
 #include <string.h> // memcpy
-#include <usefull_macros.h>
+
 #include "cmdlnopts.h"
+#include "dbg.h"
 
 /*
  * here are global parameters initialisation
@@ -33,7 +34,6 @@ static glob_pars  G;
 // default global parameters
 glob_pars const Gdefault = {
     .speed = 9600,
-    .ttyname = "/dev/ttyUSB0",
     .eol = "n",
     .tmoutms = 100,
 };
@@ -46,9 +46,12 @@ static myoption cmdlnopts[] = {
     // set 1 to param despite of its repeating number:
     {"help",    NO_ARGS,    NULL,   'h',    arg_int,    APTR(&help),        _("show this help")},
     {"speed",   NEED_ARG,   NULL,   's',    arg_int,    APTR(&G.speed),     _("baudrate (default: 9600)")},
-    {"devname", NEED_ARG,   NULL,   'd',    arg_string, APTR(&G.ttyname),   _("serial device name")},
+    {"name",    NEED_ARG,   NULL,   'n',    arg_string, APTR(&G.ttyname),   _("serial device path or server name/IP")},
     {"eol",     NEED_ARG,   NULL,   'e',    arg_string, APTR(&G.eol),       _("end of line: n (default), r, nr or rn")},
     {"timeout", NEED_ARG,   NULL,   't',    arg_int,    APTR(&G.tmoutms),   _("timeout for select() in ms (default: 100)")},
+    {"port",    NEED_ARG,   NULL,   'p',    arg_string, APTR(&G.port),      _("socket port (none for UNIX)")},
+    {"socket",  NO_ARGS,    NULL,   'S',    arg_int,    APTR(&G.socket),    _("open socket")},
+    {"dumpfile",NEED_ARG,   NULL,   'd',    arg_string, APTR(&G.dumpfile),  _("dump data to this file")},
     end_option
 };
 

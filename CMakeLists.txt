@@ -1,19 +1,18 @@
 cmake_minimum_required(VERSION 3.0)
 set(PROJ tty_term)
-set(MINOR_VERSION "1")
-set(MID_VERSION "0")
+set(MINOR_VERSION "0")
+set(MID_VERSION "1")
 set(MAJOR_VERSION "0")
 set(VERSION "${MAJOR_VERSION}.${MID_VERSION}.${MINOR_VERSION}")
 
-project(${PROJ} VERSION ${PROJ_VERSION} LANGUAGES C)
-#enable_language(C)
+project(${PROJ} VERSION ${VERSION} LANGUAGES C)
 
 message("VER: ${VERSION}")
 
 # default flags
 set(CMAKE_C_FLAGS_RELEASE "")
 set(CMAKE_C_FLAGS_DEBUG "")
-set(CMAKE_C_FLAGS "-O2 -std=gnu99")
+set(CMAKE_C_FLAGS "-O3 -std=gnu99")
 
 set(CMAKE_COLOR_MAKEFILE ON)
 

@@ -31,6 +31,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "dbg.h"
+#include "ttysocket.h"
 #include "ncurses_and_readline.h"
 
 // Keeps track of the terminal mode so we can reset the terminal if needed on errors
@@ -39,7 +41,7 @@ static bool visual_mode = false;
 static bool insert_mode = true;
 static bool should_exit = false;
 
-static ttyd *dtty = NULL;
+static chardevice *dtty = NULL;
 
 static void fail_exit(const char *msg){
     // Make sure endwin() is only called in visual mode. As a note, calling it
@@ -136,14 +138,41 @@ static void readline_redisplay(){
 
 static void show_mode(bool for_resize){
     wclear(sep_win);
-    if(insert_mode) wprintw(sep_win, "INSERT (TAB to switch, ctrl+D to quit) ENDLINE: %s SPEED: %d", dtty?dtty->seol:"n", dtty?dtty->dev->speed:"NC");
-    else wprintw(sep_win, "SCROLL (TAB to switch, q to quit) ENDLINE: %s SPEED: %d", dtty?dtty->seol:"n", dtty?dtty->dev->speed:"NC");
+    char buf[128];
+    if(insert_mode){
+        if(dtty){
+        switch(dtty->type){
+            case DEV_NETSOCKET:
+                snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) HOST: %s, ENDLINE: %s, PORT: %s",
+                    dtty->name, dtty->seol, dtty->port);
+            break;
+            case DEV_UNIXSOCKET:
+                snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) HOST: %s, ENDLINE: %s, PATH: %s",
+                    dtty->name, dtty->seol, dtty->port);
+            break;
+            case DEV_TTY:
+                snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) DEV: %s, ENDLINE: %s, SPEED: %d",
+                    dtty->name, dtty->seol, dtty->speed);
+            break;
+            default:
+            break;
+        }}else{
+            snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) NOT INITIALIZED");
+        }
+    }else{
+        snprintf(buf, 127, "SCROLL (TAB to switch, q to quit) ENDLINE: %s", dtty?dtty->seol:"n");
+    }
+    wprintw(sep_win, "%s", buf);
     if(for_resize) wnoutrefresh(sep_win);
     else wrefresh(sep_win);
     cmd_win_redisplay(for_resize);
 }
 
-void add_ttydata(const char *text){
+/**
+ * @brief ShowData - show string on display
+ * @param text - text string
+ */
+void ShowData(const char *text){
     if(!text) return;
     if(!*text) text = " "; // empty string
     Line *lp = malloc(sizeof(Line));
@@ -213,8 +242,9 @@ void init_ncurses(){
     if(has_colors()){
         init_pair(1, COLOR_WHITE, COLOR_BLUE);
         wbkgd(sep_win, COLOR_PAIR(1));
-    }else
+    }else{
         wbkgd(sep_win, A_STANDOUT);
+    }
     show_mode(false);
     mousemask(BUTTON4_PRESSED|BUTTON5_PRESSED, NULL);
 }
@@ -228,21 +258,15 @@ void deinit_ncurses(){
 }
 
 static void got_command(char *line){
-    bool err = false;
     if(!line) // Ctrl-D pressed on empty line
         should_exit = true;
     else{
         if(!*line) return; // zero length
         add_history(line);
-        if(dtty && dtty->dev){
-            if(0 == pthread_mutex_lock(&dtty->mutex)){
-                if(write_tty(dtty->dev->comfd, line, strlen(line))) err = true;
-                else if(write_tty(dtty->dev->comfd, dtty->eol, dtty->eollen)) err = true;
-                pthread_mutex_unlock(&dtty->mutex);
-                if(err) ERRX("Device disconnected");
-            }
+        if(SendData(dtty, line) == -1){
+            ERRX("Device disconnected");
         }
-        free(line);
+        FREE(line);
     }
 }
 
@@ -276,9 +300,14 @@ static void rollup(){
     }
 }
 
+/**
+ * @brief cmdline - console reading process; runs as separate thread
+ * @param arg - tty/socket device to write strings entered by user
+ * @return NULL
+ */
 void *cmdline(void* arg){
     MEVENT event;
-    dtty = (ttyd*)arg;
+    dtty = (chardevice*)arg;
     show_mode(false);
     do{
         int c = wgetch(cmd_win);
