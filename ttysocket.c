@@ -74,9 +74,15 @@ static int waittoread(int fd){
 
 // substitute all EOL's by '\n'
 static size_t rmeols(chardevice *d){
-    if(!d) return 0;
+    if(!d){
+        DBG("d is NULL");
+        return 0;
+    }
     TTY_descr *D = d->dev;
-    if(!D || D->comfd < 0) return 0;
+    if(!D || D->comfd < 0){
+        DBG("D bad");
+        return 0;
+    }
     if(0 == strcmp(d->eol, "\n")){
         DBG("No subs need");
         return D->buflen; // don't need to do this
@@ -144,6 +150,7 @@ static char *getsockdata(chardevice *d, int *len){
         if(n > 0){
             ptr = D->buf;
             ptr[n] = 0;
+            D->buflen = n;
             n = rmeols(d);
             DBG("got %d: ..%s..", n, ptr);
         }else{
@@ -262,7 +269,11 @@ static TTY_descr* opensocket(chardevice *d){
         sa = (struct sockaddr*) &saddr;
         addrlen = sizeof(saddr);
         saddr.sun_family = AF_UNIX;
-        strncpy(saddr.sun_path, d->name, 107); // if sun_path[0] == 0 then don't create a file
+        if(strncmp("\\0", d->name, 2) == 0){  // if sun_path[0] == 0 then don't create a file
+            DBG("convert name");
+            saddr.sun_path[0] = 0;
+            strncpy(saddr.sun_path+1, d->name+2, 105);
+        }else  strncpy(saddr.sun_path, d->name, 107);
         domain = AF_UNIX;
     }
     const int *type = socktypes;
