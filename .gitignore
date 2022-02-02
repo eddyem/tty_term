@@ -14,10 +14,10 @@
 *.so
 *.so.*
 
-# qt-creator
+# Qt creator
 *.config
-*.cflags
-*.cxxflags
 *.creator*
 *.files
 *.includes
+*.cflags
+*.cxxflags

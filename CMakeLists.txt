@@ -19,7 +19,7 @@ set(CMAKE_COLOR_MAKEFILE ON)
 # here is one of two variants: all .c in directory or .c files in list
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} SOURCES)
 
-# cmake -DDEBUG=1 -> debugging
+# cmake -DEBUG=1 -> debugging
 if(DEFINED EBUG)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wextra -Wall -Werror -W")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Wall -Werror -W")

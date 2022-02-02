@@ -72,11 +72,40 @@ static int waittoread(int fd){
     return 0;
 }
 
+// substitute all EOL's by '\n'
+static size_t rmeols(chardevice *d){
+    if(!d) return 0;
+    TTY_descr *D = d->dev;
+    if(!D || D->comfd < 0) return 0;
+    if(0 == strcmp(d->eol, "\n")){
+        DBG("No subs need");
+        return D->buflen; // don't need to do this
+    }
+    int L = strlen(D->buf);
+    char *newbuf = MALLOC(char, L), *ptr = D->buf, *eptr = D->buf + L;
+    while(ptr < eptr){
+        char *eol = strstr(ptr, d->eol);
+        if(eol){
+            eol[0] = '\n';
+            eol[1] = 0;
+        }
+        strcat(newbuf, ptr);
+        if(!eol) break;
+        ptr = eol + d->eollen;
+    }
+    strcpy(D->buf, newbuf);
+    FREE(newbuf);
+    D->buflen = strlen(D->buf);
+    return D->buflen;
+}
+
 // get data drom TTY
-static char *getttydata(TTY_descr *D, int *len){
-    if(!D || D->comfd < 0) return NULL;
-    size_t L = 0;
-    size_t length = D->bufsz;
+static char *getttydata(chardevice *d, int *len){
+    if(!d || !d->dev) return NULL;
+    TTY_descr *D = d->dev;
+    if(D->comfd < 0) return NULL;
+    int L = 0;
+    int length = D->bufsz;
     char *ptr = D->buf;
     int s = 0;
     do{
@@ -85,22 +114,29 @@ static char *getttydata(TTY_descr *D, int *len){
             if(len) *len = 0;
             return NULL;
         }
-        ssize_t l = read(D->comfd, ptr, length);
+        int l = read(D->comfd, ptr, length);
         if(l < 1){ // disconnected
             if(len) *len = -1;
             return NULL;
         }
         ptr += l; L += l;
         length -= l;
+        if(L >= d->eollen && 0 == strcmp(&ptr[-(d->eollen)], d->eol)){ // found end of line
+            break;
+        }
     }while(length);
     D->buflen = L;
     D->buf[L] = 0;
     if(len) *len = L;
+    if(!L) return NULL;
+    rmeols(d);
     return D->buf;
 }
 
-static char *getsockdata(TTY_descr *D, int *len){
-    if(!D || D->comfd < 0) return NULL;
+static char *getsockdata(chardevice *d, int *len){
+    if(!d || !d->dev) return NULL;
+    TTY_descr *D = d->dev;
+    if(D->comfd < 0) return NULL;
     char *ptr = NULL;
     int n = waittoread(D->comfd);
     if(n == 1){
@@ -108,7 +144,8 @@ static char *getsockdata(TTY_descr *D, int *len){
         if(n > 0){
             ptr = D->buf;
             ptr[n] = 0;
-            DBG("got %d: %s", n, ptr);
+            n = rmeols(d);
+            DBG("got %d: ..%s..", n, ptr);
         }else{
             DBG("Got nothing");
             n = -1;
@@ -130,12 +167,11 @@ char *ReadData(chardevice *d, int *len){
     char *r = NULL;
     switch(d->type){
         case DEV_TTY:
-            if(!d || !d->dev) return NULL;
-            r = getttydata(d->dev, len);
+            r = getttydata(d, len);
         break;
         case DEV_NETSOCKET:
         case DEV_UNIXSOCKET:
-            r = getsockdata(d->dev, len);
+            r = getsockdata(d, len);
         break;
         default:
         break;
@@ -159,10 +195,11 @@ int SendData(chardevice *d, char *str){
     if(!str) return 0;
     int ret = 0;
     if(0 == pthread_mutex_lock(&d->mutex)){
-        int l = strlen(str), lplus = l + d->eollen + 1;
+        int l = strlen(str), lplus = l + d->eollen;
         if(l < 1) return 0;
         if(lplus > BUFSIZ-1) lplus = BUFSIZ-1;
         snprintf(buf, lplus+1, "%s%s", str, d->eol);
+        DBG("SENDBUF (%d): _%s_", lplus, buf);
         switch(d->type){
             case DEV_TTY:
                 if(write_tty(d->dev->comfd, buf, lplus)) ret = 0;

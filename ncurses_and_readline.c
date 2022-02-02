@@ -147,8 +147,12 @@ static void show_mode(bool for_resize){
                     dtty->name, dtty->seol, dtty->port);
             break;
             case DEV_UNIXSOCKET:
-                snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) HOST: %s, ENDLINE: %s, PATH: %s",
-                    dtty->name, dtty->seol, dtty->port);
+                if(*dtty->name)
+                    snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) PATH: %s, ENDLINE: %s",
+                        dtty->name, dtty->seol);
+                else // name starting from \0
+                    snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) PATH: \\0%s, ENDLINE: %s",
+                        dtty->name+1, dtty->seol);
             break;
             case DEV_TTY:
                 snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) DEV: %s, ENDLINE: %s, SPEED: %d",
