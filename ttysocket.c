@@ -269,11 +269,16 @@ static TTY_descr* opensocket(chardevice *d){
         sa = (struct sockaddr*) &saddr;
         addrlen = sizeof(saddr);
         saddr.sun_family = AF_UNIX;
-        if(strncmp("\\0", d->name, 2) == 0){  // if sun_path[0] == 0 then don't create a file
+        if(*(d->name) == 0){ // if sun_path[0] == 0 then don't create a file
+            DBG("convert name");
+            saddr.sun_path[0] = 0;
+            strncpy(saddr.sun_path+1, d->name+1, 105);
+        }
+        else if(strncmp("\\0", d->name, 2) == 0){
             DBG("convert name");
             saddr.sun_path[0] = 0;
             strncpy(saddr.sun_path+1, d->name+2, 105);
-        }else  strncpy(saddr.sun_path, d->name, 107);
+        }else  strncpy(saddr.sun_path, d->name, 106);
         domain = AF_UNIX;
     }
     const int *type = socktypes;
