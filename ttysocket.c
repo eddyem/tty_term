@@ -214,7 +214,7 @@ int SendData(chardevice *d, char *str){
             break;
             case DEV_NETSOCKET:
             case DEV_UNIXSOCKET:
-                if(lplus != send(d->dev->comfd, buf, lplus, 0)) ret = 0;
+                if(lplus != send(d->dev->comfd, buf, lplus, MSG_NOSIGNAL)) ret = 0;
                 else ret = l;
                 pthread_mutex_unlock(&d->mutex);
             break;
