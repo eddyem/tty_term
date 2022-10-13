@@ -290,7 +290,6 @@ static TTY_descr* opensocket(chardevice *d){
                 close(descr->comfd);
             }else break;
         }
-        WARNX("socket()");
         ++type;
     }
     if(descr->comfd < 0){
