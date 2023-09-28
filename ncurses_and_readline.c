@@ -155,8 +155,8 @@ static void show_mode(bool for_resize){
                         dtty->name+1, dtty->seol);
             break;
             case DEV_TTY:
-                snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) DEV: %s, ENDLINE: %s, SPEED: %d",
-                    dtty->name, dtty->seol, dtty->speed);
+                snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) DEV: %s, ENDLINE: %s, SPEED: %d, FORMAT: %s",
+                    dtty->name, dtty->seol, dtty->speed, dtty->port);
             break;
             default:
             break;

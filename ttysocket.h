@@ -21,7 +21,9 @@
 #define TTY_H__
 
 #include <pthread.h>
-#include "dbg.h"
+#include <asm-generic/termbits.h>
+#include <stdbool.h>
+//#include "dbg.h"
 
 typedef enum{
     DEV_TTY,
@@ -29,10 +31,22 @@ typedef enum{
     DEV_UNIXSOCKET,
 } devtype;
 
+typedef struct {
+    char *portname;         // device filename (should be freed before structure freeing)
+    int speed;              // baudrate in human-readable format
+    char *format;           // format like 8N1
+    struct termios2 oldtty; // TTY flags for previous port settings
+    struct termios2 tty;    // TTY flags for current settings
+    int comfd;              // TTY file descriptor
+    char *buf;              // buffer for data read
+    size_t bufsz;           // size of buf
+    size_t buflen;          // length of data read into buf
+} TTY_descr2;
+
 typedef struct{
     devtype type;               // type
     char *name;                 // filename (dev or UNIX socket) or server name/IP
-    TTY_descr *dev;             // tty serial device
+    TTY_descr2 *dev;            // tty serial device
     char *port;                 // port to connect
     int speed;                  // tty speed
     pthread_mutex_t mutex;      // reading/writing mutex

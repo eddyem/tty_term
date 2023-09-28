@@ -61,13 +61,12 @@ int main(int argc, char **argv){
         signals(0);
     }
     conndev.name = strdup(G->ttyname);
-    conndev.speed = G->speed;
+    conndev.port = strdup(G->port);
     if(G->socket){
         if(!G->port) conndev.type = DEV_UNIXSOCKET;
-        else{
-            conndev.type = DEV_NETSOCKET;
-            conndev.port = strdup(G->port);
-        }
+        else conndev.type = DEV_NETSOCKET;
+    }else{
+        conndev.speed = G->speed;
     }
     if(!opendev(&conndev, G->dumpfile)){
         signals(0);

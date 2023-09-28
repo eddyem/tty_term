@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.0)
 set(PROJ tty_term)
-set(MINOR_VERSION "0")
+set(MINOR_VERSION "1")
 set(MID_VERSION "1")
 set(MAJOR_VERSION "0")
 set(VERSION "${MAJOR_VERSION}.${MID_VERSION}.${MINOR_VERSION}")
@@ -67,7 +67,7 @@ include_directories(${${PROJ}_INCLUDE_DIRS})
 # -L
 link_directories(${${PROJ}_LIBRARY_DIRS})
 # -D
-add_definitions(${CFLAGS} -DLOCALEDIR=\"${LOCALEDIR}\"
+add_definitions(${CFLAGS} -DLOCALEDIR=\"${LOCALEDIR}\" -DPROJECT=\"${PROJ}\"
         -DPACKAGE_VERSION=\"${VERSION}\" -DGETTEXT_PACKAGE=\"${PROJ}\"
         -DMINOR_VERSION=\"${MINOR_VERSION}\" -DMID_VERSION=\"${MID_VERSION}\"
         -DMAJOR_VERSION=\"${MAJOR_VESION}\")

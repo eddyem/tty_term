@@ -20,7 +20,10 @@
 #ifndef DBG_H__
 #define DBG_H__
 
+// dirty trick
+#define termios xxtermios
 #include <usefull_macros.h>
+#undef termios
 
 #ifdef EBUG
 #undef DBG
@@ -32,10 +35,10 @@
 #define FNAME() do{LOGDBG("%s (%s, line %d)", __func__, __FILE__, __LINE__);}while(0)
 #define DBG(...) do{LOGDBG("%s (%s, line %d):", __func__, __FILE__, __LINE__); \
                   LOGDBGADD(__VA_ARGS__);} while(0)
-#define ERR(...) do{LOGERR(__VA_ARGS__); signals(9);}while(0)
-#define ERRX(...) do{LOGERR(__VA_ARGS__); signals(9);}while(0)
+#define ERR(...) do{red(__VA_ARGS__); printf("\n"); LOGERR(__VA_ARGS__); signals(9);}while(0)
+#define ERRX(...) do{red(__VA_ARGS__); printf("\n"); LOGERR(__VA_ARGS__); signals(9);}while(0)
 //#define WARN(...) do{LOGWARN(__VA_ARGS__);}while(0)
-#define WARNX(...) do{LOGWARN(__VA_ARGS__);}while(0)
+#define WARNX(...) do{red(__VA_ARGS__); printf("\n"); LOGWARN(__VA_ARGS__);}while(0)
 #endif
 
 #endif // DBG_H__
