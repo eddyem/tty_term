@@ -12,7 +12,7 @@ message("VER: ${VERSION}")
 # default flags
 set(CMAKE_C_FLAGS_RELEASE "")
 set(CMAKE_C_FLAGS_DEBUG "")
-set(CMAKE_C_FLAGS "-O3 -std=gnu99")
+set(CMAKE_C_FLAGS "-O3 -std=gnu99 -D_XOPEN_SOURCE=12345 -D_DEFAULT_SOURCE")
 
 set(CMAKE_COLOR_MAKEFILE ON)
 

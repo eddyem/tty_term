@@ -36,6 +36,7 @@ glob_pars const Gdefault = {
     .speed = 9600,
     .eol = "n",
     .tmoutms = 100,
+    .port = "8N1"
 };
 
 /*

@@ -69,7 +69,7 @@ static int waittoread(int fd){
         break;
     }while(1);
     if(FD_ISSET(fd, &fds)){
-        DBG("FD_ISSET");
+        //DBG("FD_ISSET");
         return 1;
     }
     return 0;

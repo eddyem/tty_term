@@ -35,6 +35,13 @@
 #include "ttysocket.h"
 #include "ncurses_and_readline.h"
 
+enum { // using colors
+    BKG_NO = 1,
+    NORMAL_NO = 2,
+    MARKED_NO = 3
+};
+#define COLOR(x)  COLOR_PAIR(x ## _NO)
+
 // Keeps track of the terminal mode so we can reset the terminal if needed on errors
 static bool visual_mode = false;
 // insert commands when true; roll upper screen when false
@@ -90,27 +97,26 @@ static void forward_to_readline(char c){
 static void msg_win_redisplay(bool for_resize){
     werase(msg_win);
     Line *l = firstline;
+    static char *buf = NULL;
     int nlines = 0; // total amount of lines @ output
     for(; l && (nlines < LINES - 2); l = l->next){
-        size_t contlen = strlen(l->contents) + 128;
-        char *buf = malloc(contlen);
-        // don't add trailing '\n' (or last line will be empty with cursor)
-        contlen = snprintf(buf, contlen, "%s", l->contents);
-        int nlnext = (contlen - 1) / COLS + 1;
         wmove(msg_win, nlines, 0);
-        if(nlines + nlnext < LINES-2){ // can put out the full line
-            waddstr(msg_win, buf);
-            //wprintw(msg_win, "%d (%d): %s -> %d", l->Nline, firstline->Nline, l->contents, nlnext);
-            nlines += nlnext;
-        }else{ // put only first part
-            int rest = LINES-2 - nlines;
-            waddnstr(msg_win, buf, rest *COLS);
-            free(buf);
-            break;
+        size_t contlen = strlen(l->contents) + 128;
+        buf = realloc(buf, contlen);
+        int sz = strlen(l->contents);
+        char *ptr = l->contents;
+        for(int i = 0; i < sz; ++i, ++ptr){
+            char c = *ptr;
+            if(c <'a' || c > 'z'){
+                wattron(msg_win, COLOR(MARKED));
+                waddch(msg_win, c);
+                wattroff(msg_win, COLOR(MARKED));
+            }else{
+                waddch(msg_win, c);
+            }
         }
-        free(buf);
+        ++nlines;
     }
-    curs_set(0);
     if(for_resize) wnoutrefresh(msg_win);
     else wrefresh(msg_win);
 }
@@ -127,9 +133,11 @@ static void cmd_win_redisplay(bool for_resize){
     snprintf(abuf, 4096, "> %s", rl_line_buffer);
     waddstr(cmd_win, abuf+x);
     wmove(cmd_win, 0, cursor_col);
-    curs_set(2);
     if(for_resize) wnoutrefresh(cmd_win);
     else wrefresh(cmd_win);
+    keypad(cmd_win, TRUE);
+    if(insert_mode) curs_set(2);
+    else curs_set(0);
 }
 
 static void readline_redisplay(){
@@ -229,7 +237,7 @@ void init_ncurses(){
     noecho();
     nonl();
     intrflush(NULL, FALSE);
-    keypad(cmd_win, 0);
+    keypad(cmd_win, TRUE);
     curs_set(2);
     if(LINES > 2){
         msg_win = newwin(LINES - 2, COLS, 0, 0);
@@ -244,8 +252,10 @@ void init_ncurses(){
     if(!msg_win || !sep_win || !cmd_win)
         fail_exit("Failed to allocate windows");
     if(has_colors()){
-        init_pair(1, COLOR_WHITE, COLOR_BLUE);
-        wbkgd(sep_win, COLOR_PAIR(1));
+        init_pair(BKG_NO, COLOR_WHITE, COLOR_BLUE);
+        init_pair(NORMAL_NO, COLOR_WHITE, COLOR_BLACK);
+        init_pair(MARKED_NO, COLOR_CYAN, COLOR_BLACK);
+        wbkgd(sep_win, COLOR(BKG));
     }else{
         wbkgd(sep_win, A_STANDOUT);
     }
@@ -294,6 +304,8 @@ static void rolldown(){
     if(firstline && firstline->prev){
         firstline = firstline->prev;
         msg_win_redisplay(false);
+        show_mode(false);
+        doupdate();
     }
 }
 
@@ -301,6 +313,8 @@ static void rollup(){
     if(firstline && firstline->next){
         firstline = firstline->next;
         msg_win_redisplay(false);
+        show_mode(false);
+        doupdate();
     }
 }
 
@@ -316,7 +330,8 @@ void *cmdline(void* arg){
     do{
         int c = wgetch(cmd_win);
         bool processed = true;
-        switch(c){
+        //DBG("wgetch got %d", c);
+        switch(c){ // common keys for both modes
             case KEY_MOUSE:
                 if(getmouse(&event) == OK){
                     if(event.bstate & (BUTTON4_PRESSED)) rolldown(); // wheel up
@@ -324,11 +339,8 @@ void *cmdline(void* arg){
                 }
             break;
             case '\t': // tab switch between scroll and edit mode
-                keypad(cmd_win, insert_mode); // enable/disable reaction @ special characters
                 insert_mode = !insert_mode;
                 show_mode(false);
-                if(insert_mode) curs_set(2);
-                else curs_set(0);
             break;
             case KEY_RESIZE:
                 resize();
@@ -338,7 +350,51 @@ void *cmdline(void* arg){
         }
         if(processed) continue;
         if(insert_mode){
-            forward_to_readline(c);
+            DBG("forward_to_readline(%d)", c);
+            char *ptr = NULL;
+            switch(c){ // check special keys
+                case KEY_UP:
+                    ptr = "A";
+                break;
+                case KEY_DOWN:
+                    ptr = "B";
+                break;
+                case KEY_RIGHT:
+                    ptr = "C";
+                break;
+                case KEY_LEFT:
+                    ptr = "D";
+                break;
+                case KEY_BACKSPACE:
+                    ptr = "H";
+                break;
+                case KEY_IC:
+                    DBG("key insert");
+                    ptr = "2~";
+                break;
+                case KEY_DC:
+                    ptr = "3~";
+                break;
+                case KEY_HOME:
+                    ptr = "H";
+                break;
+                case KEY_PPAGE:
+                    ptr = "5~";
+                break;
+                case KEY_NPAGE:
+                    ptr = "6~";
+                break;
+                case KEY_END:
+                    ptr = "F";
+                break;
+                default:
+                    forward_to_readline(c);
+            }
+            if(ptr){ // arrows and so on: 27, 91, code
+                forward_to_readline(27);
+                forward_to_readline(91);
+                while(*ptr) forward_to_readline(*ptr++);
+            }
         }else{
             switch(c){
                 case KEY_UP: // roll down for one item
