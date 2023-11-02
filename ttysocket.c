@@ -33,6 +33,8 @@
 
 static int sec = 0, usec = 100; // timeout
 static FILE *dupfile = NULL; // file for output
+static chardevice *device = NULL; // current opened device
+
 // TODO: if unix socket name starts with \0 translate it as \\0 to d->name!
 
 // set Read_tty timeout in milliseconds
@@ -76,31 +78,31 @@ static int waittoread(int fd){
 }
 
 // substitute all EOL's by '\n'
-static size_t rmeols(chardevice *d){
-    if(!d){
+static size_t rmeols(){
+    if(!device){
         DBG("d is NULL");
         return 0;
     }
-    TTY_descr2 *D = d->dev;
+    TTY_descr2 *D = device->dev;
     if(!D || D->comfd < 0){
         DBG("D bad");
         return 0;
     }
-    if(0 == strcmp(d->eol, "\n")){
+    if(0 == strcmp(device->eol, "\n")){
         DBG("No subs need");
         return D->buflen; // don't need to do this
     }
     int L = strlen(D->buf);
     char *newbuf = MALLOC(char, L), *ptr = D->buf, *eptr = D->buf + L;
     while(ptr < eptr){
-        char *eol = strstr(ptr, d->eol);
+        char *eol = strstr(ptr, device->eol);
         if(eol){
             eol[0] = '\n';
             eol[1] = 0;
         }
         strcat(newbuf, ptr);
         if(!eol) break;
-        ptr = eol + d->eollen;
+        ptr = eol + device->eollen;
     }
     strcpy(D->buf, newbuf);
     FREE(newbuf);
@@ -108,10 +110,16 @@ static size_t rmeols(chardevice *d){
     return D->buflen;
 }
 
+char *geteol(int *s){
+    if(!device) return NULL;
+    *s = device->eollen;
+    return device->eol;
+}
+
 // get data drom TTY
-static char *getttydata(chardevice *d, int *len){
-    if(!d || !d->dev) return NULL;
-    TTY_descr2 *D = d->dev;
+static char *getttydata(int *len){
+    if(!device || !device->dev) return NULL;
+    TTY_descr2 *D = device->dev;
     if(D->comfd < 0) return NULL;
     int L = 0;
     int length = D->bufsz;
@@ -130,7 +138,7 @@ static char *getttydata(chardevice *d, int *len){
         }
         ptr += l; L += l;
         length -= l;
-        if(L >= d->eollen && 0 == strcmp(&ptr[-(d->eollen)], d->eol)){ // found end of line
+        if(L >= device->eollen && 0 == strcmp(&ptr[-(device->eollen)], device->eol)){ // found end of line
             break;
         }
     }while(length);
@@ -138,14 +146,14 @@ static char *getttydata(chardevice *d, int *len){
     D->buf[L] = 0;
     if(len) *len = L;
     if(!L) return NULL;
-    rmeols(d);
+    rmeols(device);
     DBG("buffer len: %zd, content: =%s=", D->buflen, D->buf);
     return D->buf;
 }
 
-static char *getsockdata(chardevice *d, int *len){
-    if(!d || !d->dev) return NULL;
-    TTY_descr2 *D = d->dev;
+static char *getsockdata(int *len){
+    if(!device || !device->dev) return NULL;
+    TTY_descr2 *D = device->dev;
     if(D->comfd < 0) return NULL;
     char *ptr = NULL;
     int n = waittoread(D->comfd);
@@ -155,7 +163,7 @@ static char *getsockdata(chardevice *d, int *len){
             ptr = D->buf;
             ptr[n] = 0;
             D->buflen = n;
-            n = rmeols(d);
+            n = rmeols(device);
             DBG("got %d: ..%s..", n, ptr);
         }else{
             DBG("Got nothing");
@@ -172,23 +180,24 @@ static char *getsockdata(chardevice *d, int *len){
  * @param len (o) - length of data read (-1 if device disconnected)
  * @return NULL or string
  */
-char *ReadData(chardevice *d, int *len){
-    if(!d || !d->dev) return NULL;
+char *ReadData(int *len){
+    if(!device || !device->dev) return NULL;
     if(len) *len = -1;
     char *r = NULL;
-    switch(d->type){
+    switch(device->type){
         case DEV_TTY:
-            r = getttydata(d, len);
+            r = getttydata(len);
         break;
         case DEV_NETSOCKET:
         case DEV_UNIXSOCKET:
-            r = getsockdata(d, len);
+            r = getsockdata(len);
         break;
         default:
         break;
     }
     if(r && dupfile){
-        fprintf(dupfile, "< %s", r);
+        fwrite("< ", 1, 2, dupfile);
+        fwrite(r, 1, *len, dupfile);
     }
     return r;
 }
@@ -196,40 +205,33 @@ char *ReadData(chardevice *d, int *len){
 /**
  * @brief SendData - send data to tty or socket
  * @param d - device
- * @param str - text string
- * @return 0 if error, -1 if disconnected
+ * @param data - buffer with data
+ * @return 0 if error or empty string, -1 if disconnected
  */
-int SendData(chardevice *d, char *str){
-    char buf[BUFSIZ];
-    if(!d) return -1;
-    DBG("send %s", str);
-    if(!str) return 0;
+int SendData(const char *data, size_t len){
+    if(!device) return -1;
+    if(!data || len == 0) return 0;
     int ret = 0;
-    if(0 == pthread_mutex_lock(&d->mutex)){
-        int l = strlen(str), lplus = l + d->eollen;
-        if(l < 1) return 0;
-        if(lplus > BUFSIZ-1) lplus = BUFSIZ-1;
-        snprintf(buf, lplus+1, "%s%s", str, d->eol);
-        DBG("SENDBUF (%d): _%s_", lplus, buf);
-        switch(d->type){
+    if(0 == pthread_mutex_lock(&device->mutex)){
+        switch(device->type){
             case DEV_TTY:
-                if(write_tty(d->dev->comfd, buf, lplus)) ret = 0;
-                else ret = l;
+                if(write_tty(device->dev->comfd, data, len)) ret = 0;
+                else ret = len;
             break;
             case DEV_NETSOCKET:
             case DEV_UNIXSOCKET:
-                if(lplus != send(d->dev->comfd, buf, lplus, MSG_NOSIGNAL)) ret = 0;
-                else ret = l;
-                pthread_mutex_unlock(&d->mutex);
+                if(len != (size_t)send(device->dev->comfd, data, len, MSG_NOSIGNAL)) ret = 0;
+                else ret = len;
             break;
             default:
-                str = NULL;
+                data = NULL;
             break;
         }
-        if(str && dupfile){
-            fprintf(dupfile, "> %s", buf);
+        if(data && dupfile){
+            fwrite("> ", 1, 2, dupfile);
+            fwrite(data, 1, len, dupfile);
         }
-        pthread_mutex_unlock(&d->mutex);
+        pthread_mutex_unlock(&device->mutex);
     }else ret = -1;
     DBG("ret=%d", ret);
     return ret;
@@ -237,8 +239,8 @@ int SendData(chardevice *d, char *str){
 
 static const int socktypes[] = {SOCK_STREAM, SOCK_RAW, SOCK_RDM, SOCK_SEQPACKET, SOCK_DCCP, SOCK_PACKET, SOCK_DGRAM, 0};
 
-static TTY_descr2* opensocket(chardevice *d){
-    if(!d) return FALSE;
+static TTY_descr2* opensocket(){
+    if(!device) return FALSE;
     TTY_descr2 *descr = MALLOC(TTY_descr2, 1); // only for `buf` and bufsz/buflen
     descr->buf = MALLOC(char, BUFSIZ);
     descr->bufsz = BUFSIZ;
@@ -250,11 +252,11 @@ static TTY_descr2* opensocket(chardevice *d){
     struct sockaddr *sa = NULL;
     socklen_t addrlen = 0;
     int domain = -1;
-    if(d->type == DEV_NETSOCKET){
-        DBG("NETSOCK to %s", d->name);
+    if(device->type == DEV_NETSOCKET){
+        DBG("NETSOCK to %s", device->name);
         sa = (struct sockaddr*) &addr;
         addrlen = sizeof(addr);
-        if((host = gethostbyname(d->name)) == NULL ){
+        if((host = gethostbyname(device->name)) == NULL ){
             WARN("gethostbyname()");
             FREE(descr->buf);
             FREE(descr);
@@ -263,7 +265,7 @@ static TTY_descr2* opensocket(chardevice *d){
         struct in_addr *ia = (struct in_addr*)host->h_addr_list[0];
         DBG("addr: %s", inet_ntoa(*ia));
         addr.sin_family = AF_INET;
-        int p = atoi(d->port); DBG("PORT: %s - %d", d->port, p);
+        int p = atoi(device->port); DBG("PORT: %s - %d", device->port, p);
         addr.sin_port = htons(p);
         //addr.sin_addr.s_addr = *(long*)(host->h_addr);
         addr.sin_addr.s_addr = ia->s_addr;
@@ -273,16 +275,16 @@ static TTY_descr2* opensocket(chardevice *d){
         sa = (struct sockaddr*) &saddr;
         addrlen = sizeof(saddr);
         saddr.sun_family = AF_UNIX;
-        if(*(d->name) == 0){ // if sun_path[0] == 0 then don't create a file
+        if(*(device->name) == 0){ // if sun_path[0] == 0 then don't create a file
             DBG("convert name");
             saddr.sun_path[0] = 0;
-            strncpy(saddr.sun_path+1, d->name+1, 105);
+            strncpy(saddr.sun_path+1, device->name+1, 105);
         }
-        else if(strncmp("\\0", d->name, 2) == 0){
+        else if(strncmp("\\0", device->name, 2) == 0){
             DBG("convert name");
             saddr.sun_path[0] = 0;
-            strncpy(saddr.sun_path+1, d->name+2, 105);
-        }else  strncpy(saddr.sun_path, d->name, 106);
+            strncpy(saddr.sun_path+1, device->name+2, 105);
+        }else  strncpy(saddr.sun_path, device->name, 106);
         domain = AF_UNIX;
     }
     const int *type = socktypes;
@@ -363,17 +365,17 @@ someerr:
     return NULL;
 }
 
-static TTY_descr2* opentty(chardevice *d){
-    if(!d->name){
+static TTY_descr2* opentty(){
+    if(!device->name){
         /// Отсутствует имя порта
         WARNX(_("Port name is missing"));
         return NULL;
     }
     TTY_descr2 *descr = MALLOC(TTY_descr2, 1);
-    descr->portname = strdup(d->name);
-    descr->speed = d->speed;
+    descr->portname = strdup(device->name);
+    descr->speed = device->speed;
     tcflag_t flags;
-    descr->format = parse_format(d->port, &flags);
+    descr->format = parse_format(device->port, &flags);
     if(!descr->format) goto someerr;
     descr->buf = MALLOC(char, BUFSIZ);
     descr->bufsz = BUFSIZ-1;
@@ -389,14 +391,14 @@ static TTY_descr2* opentty(chardevice *d){
     descr->tty.c_lflag = 0; // ~(ICANON | ECHO | ECHOE | ISIG)
     descr->tty.c_iflag = 0;
     descr->tty.c_cflag = BOTHER | flags |CREAD|CLOCAL;
-    descr->tty.c_ispeed = d->speed;
-    descr->tty.c_ospeed = d->speed;
+    descr->tty.c_ispeed = device->speed;
+    descr->tty.c_ospeed = device->speed;
     if(ioctl(descr->comfd, TCSETS2, &descr->tty)){
         WARN(_("Can't set new port config"));
         goto someerr;
     }
     ioctl(descr->comfd, TCGETS2, &descr->tty);
-    d->speed = descr->tty.c_ispeed;
+    device->speed = descr->tty.c_ispeed;
 #ifdef EBUG
     printf("ispeed: %d, ospeed: %d, cflag=%d (BOTHER=%d)\n", descr->tty.c_ispeed, descr->tty.c_ospeed, descr->tty.c_cflag&CBAUD, BOTHER);
     if(system("stty -F /dev/ttyUSB0")) WARN("system()");
@@ -417,20 +419,24 @@ someerr:
 int opendev(chardevice *d, char *path){
     if(!d) return FALSE;
     DBG("Try to open device");
-    switch(d->type){
+    device = MALLOC(chardevice, 1);
+    memcpy(device, d, sizeof(chardevice));
+    device->name = strdup(d->name);
+    device->port = strdup(d->port);
+    switch(device->type){
         case DEV_TTY:
             DBG("Serial");
-            d->dev = opentty(d);
-            if(!d->dev){
-                WARN("Can't open device %s", d->name);
+            device->dev = opentty();
+            if(!device->dev){
+                WARN("Can't open device %s", device->name);
                 DBG("CANT OPEN");
                 return FALSE;
             }
         break;
         case DEV_NETSOCKET:
         case DEV_UNIXSOCKET:
-            d->dev = opensocket(d);
-            if(!d->dev){
+            device->dev = opensocket();
+            if(!device->dev){
                 WARNX("Can't open socket");
                 DBG("CANT OPEN");
                 return FALSE;
@@ -443,44 +449,45 @@ int opendev(chardevice *d, char *path){
         dupfile = fopen(path, "a");
         if(!dupfile){
             WARN("Can't open %s", path);
-            closedev(d);
+            closedev();
             return FALSE;
         }
     }
     return TRUE;
 }
 
-void closedev(chardevice *d){
-    if(!d) return;
-    pthread_mutex_unlock(&d->mutex);
-    pthread_mutex_trylock(&d->mutex);
+void closedev(){
+    if(!device) return;
+    pthread_mutex_unlock(&device->mutex);
+    pthread_mutex_trylock(&device->mutex);
     if(dupfile){
         fclose(dupfile);
         dupfile = NULL;
     }
-    switch(d->type){
+    switch(device->type){
         case DEV_TTY:
-            if(d->dev){
-                TTY_descr2 *t = d->dev;
+            if(device->dev){
+                TTY_descr2 *t = device->dev;
                 ioctl(t->comfd, TCSETS2, &t->oldtty); // return TTY to previous state
                 close(t->comfd);
             }
         break;
         case DEV_NETSOCKET:
-            if(d->dev){
-                close(d->dev->comfd);
-                FREE(d->dev);
+            if(device->dev){
+                close(device->dev->comfd);
+                FREE(device->dev);
             }
         break;
         default:
             return;
     }
-    if(d->dev){
-        FREE(d->dev->format);
-        FREE(d->dev->portname);
-        FREE(d->dev->buf);
-        FREE(d->dev);
+    if(device->dev){
+        FREE(device->dev->format);
+        FREE(device->dev->portname);
+        FREE(device->dev->buf);
+        FREE(device->dev);
     }
-    FREE(d->name);
+    FREE(device->name);
+    FREE(device);
     DBG("Device closed");
 }

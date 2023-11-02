@@ -26,7 +26,6 @@
 #include <readline/history.h>
 #include <readline/readline.h>
 #include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,11 +33,14 @@
 #include "dbg.h"
 #include "ttysocket.h"
 #include "ncurses_and_readline.h"
+#include "popup_msg.h"
+#include "string_functions.h"
 
 enum { // using colors
     BKG_NO = 1,
-    NORMAL_NO = 2,
-    MARKED_NO = 3
+    BKGMARKED_NO = 2,
+    NORMAL_NO = 3,
+    MARKED_NO = 4
 };
 #define COLOR(x)  COLOR_PAIR(x ## _NO)
 
@@ -47,6 +49,10 @@ static bool visual_mode = false;
 // insert commands when true; roll upper screen when false
 static bool insert_mode = true;
 static bool should_exit = false;
+
+static disptype disp_type = DISP_TEXT;  // type of displaying data
+static disptype input_type = DISP_TEXT; // parsing type of input data
+const char *dispnames[] = {"TEXT", "RAW", "HEX"};
 
 static chardevice *dtty = NULL;
 
@@ -94,26 +100,54 @@ static void forward_to_readline(char c){
     rl_callback_read_char();
 }
 
+// functions to modify output data
+static char *text_putchar(char *next){
+    char c = *next++;
+    DBG("put 0x%02X (%c)", c, c);
+    if(c < 31 || c > 126){
+        wattron(msg_win, COLOR(MARKED));
+        //waddch(msg_win, c);
+        wprintw(msg_win, "%02X", (uint8_t)c);
+        wattroff(msg_win, COLOR(MARKED));
+    }else{
+        //wprintw(msg_win, "%c" COLOR_GREEN "green" COLOR_RED "red" COLOR_OLD, c);
+        waddch(msg_win, c);
+    }
+    return next;
+}
+static char *raw_putchar(char *next){
+    waddch(msg_win, *next);
+    return next+1;
+}
+static char *hex_putchar(char *next){
+    waddch(msg_win, *next);
+    return next+1;
+}
+
 static void msg_win_redisplay(bool for_resize){
     werase(msg_win);
     Line *l = firstline;
-    static char *buf = NULL;
+    //static char *buf = NULL;
     int nlines = 0; // total amount of lines @ output
-    for(; l && (nlines < LINES - 2); l = l->next){
+    int linemax = LINES - 2;
+    char *(*putfn)(char *);
+    switch(disp_type){
+        case DISP_RAW:
+            putfn = raw_putchar;
+        break;
+        case DISP_HEX:
+            putfn = hex_putchar;
+        break;
+        default:
+            putfn = text_putchar;
+    }
+    for(; l && (nlines < linemax); l = l->next){
         wmove(msg_win, nlines, 0);
-        size_t contlen = strlen(l->contents) + 128;
-        buf = realloc(buf, contlen);
-        int sz = strlen(l->contents);
+        //size_t contlen = strlen(l->contents) + 128;
+        //buf = realloc(buf, contlen);
         char *ptr = l->contents;
-        for(int i = 0; i < sz; ++i, ++ptr){
-            char c = *ptr;
-            if(c <'a' || c > 'z'){
-                wattron(msg_win, COLOR(MARKED));
-                waddch(msg_win, c);
-                wattroff(msg_win, COLOR(MARKED));
-            }else{
-                waddch(msg_win, c);
-            }
+        while((ptr = putfn(ptr)) && *ptr && nlines < linemax){
+            nlines = msg_win->_cury;
         }
         ++nlines;
     }
@@ -122,7 +156,7 @@ static void msg_win_redisplay(bool for_resize){
 }
 
 static void cmd_win_redisplay(bool for_resize){
-    int cursor_col = 2 + rl_point; // "> " width is 2
+    int cursor_col = 3 + strlen(dispnames[input_type]) + rl_point; // " > " width is 3
     werase(cmd_win);
     int x = 0, maxw = COLS-2;
     if(cursor_col > maxw){
@@ -130,7 +164,7 @@ static void cmd_win_redisplay(bool for_resize){
         cursor_col = maxw;
     }
     char abuf[4096];
-    snprintf(abuf, 4096, "> %s", rl_line_buffer);
+    snprintf(abuf, 4096, "%s > %s", dispnames[input_type], rl_line_buffer);
     waddstr(cmd_win, abuf+x);
     wmove(cmd_win, 0, cursor_col);
     if(for_resize) wnoutrefresh(cmd_win);
@@ -145,26 +179,27 @@ static void readline_redisplay(){
 }
 
 static void show_mode(bool for_resize){
+    static const char *insmodetext = "INSERT (F1 - help)";
     wclear(sep_win);
     char buf[128];
     if(insert_mode){
         if(dtty){
         switch(dtty->type){
             case DEV_NETSOCKET:
-                snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) HOST: %s, ENDLINE: %s, PORT: %s",
-                    dtty->name, dtty->seol, dtty->port);
+                snprintf(buf, 127, "%s HOST: %s, ENDLINE: %s, PORT: %s",
+                    insmodetext, dtty->name, dtty->seol, dtty->port);
             break;
             case DEV_UNIXSOCKET:
                 if(*dtty->name)
-                    snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) PATH: %s, ENDLINE: %s",
-                        dtty->name, dtty->seol);
+                    snprintf(buf, 127, "%s PATH: %s, ENDLINE: %s",
+                        insmodetext, dtty->name, dtty->seol);
                 else // name starting from \0
-                    snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) PATH: \\0%s, ENDLINE: %s",
-                        dtty->name+1, dtty->seol);
+                    snprintf(buf, 127, "%s PATH: \\0%s, ENDLINE: %s",
+                        insmodetext, dtty->name+1, dtty->seol);
             break;
             case DEV_TTY:
-                snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) DEV: %s, ENDLINE: %s, SPEED: %d, FORMAT: %s",
-                    dtty->name, dtty->seol, dtty->speed, dtty->port);
+                snprintf(buf, 127, "%s DEV: %s, ENDLINE: %s, SPEED: %d, FORMAT: %s",
+                    insmodetext, dtty->name, dtty->seol, dtty->speed, dtty->port);
             break;
             default:
             break;
@@ -172,8 +207,11 @@ static void show_mode(bool for_resize){
             snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) NOT INITIALIZED");
         }
     }else{
-        snprintf(buf, 127, "SCROLL (TAB to switch, q to quit) ENDLINE: %s", dtty?dtty->seol:"n");
+        snprintf(buf, 127, "SCROLL (F1 - help) ENDLINE: %s", dtty?dtty->seol:"n");
     }
+    wattron(sep_win, COLOR(BKGMARKED));
+    wprintw(sep_win, "%s ", dispnames[disp_type]);
+    wattroff(sep_win, COLOR(BKGMARKED));
     wprintw(sep_win, "%s", buf);
     if(for_resize) wnoutrefresh(sep_win);
     else wrefresh(sep_win);
@@ -253,6 +291,7 @@ void init_ncurses(){
         fail_exit("Failed to allocate windows");
     if(has_colors()){
         init_pair(BKG_NO, COLOR_WHITE, COLOR_BLUE);
+        init_pair(BKGMARKED_NO, 1, COLOR_BLUE); // COLOR_RED used in my usefull_macros
         init_pair(NORMAL_NO, COLOR_WHITE, COLOR_BLACK);
         init_pair(MARKED_NO, COLOR_CYAN, COLOR_BLACK);
         wbkgd(sep_win, COLOR(BKG));
@@ -271,16 +310,18 @@ void deinit_ncurses(){
     endwin();
 }
 
+static char *previous_line = NULL; // previous line in readline input
 static void got_command(char *line){
     if(!line) // Ctrl-D pressed on empty line
         should_exit = true;
     else{
         if(!*line) return; // zero length
-        add_history(line);
-        if(SendData(dtty, line) == -1){
+        if(!previous_line || strcmp(previous_line, line)) add_history(line); // omit repeats
+        FREE(previous_line);
+        if(convert_and_send(input_type, line) == -1){
             ERRX("Device disconnected");
         }
-        FREE(line);
+        previous_line = line;
     }
 }
 
@@ -293,7 +334,22 @@ void init_readline(){
     rl_getc_function = readline_getc;
     rl_input_available_hook = readline_input_avail;
     rl_redisplay_function = readline_redisplay;
-    rl_callback_handler_install("> ", got_command);
+    rl_callback_handler_install("", got_command);
+}
+
+/**
+ * @brief change_disp - change input or output data types (text/raw/hex)
+ * @param in, out - types for input and display
+  */
+static void change_disp(disptype in, disptype out){
+    if(in >= DISP_TEXT && in < DISP_UNCHANGED){
+        input_type = in;
+        DBG("input -> %s", dispnames[in]);
+    }
+    if(out >= DISP_TEXT && out < DISP_UNCHANGED){
+        disp_type = out;
+    }
+    show_mode(false);
 }
 
 void deinit_readline(){
@@ -318,6 +374,33 @@ static void rollup(){
     }
 }
 
+static const char *help[] = {
+    "Common commands:",
+    "  F1             - show this help",
+    "  F2             - text mode",
+    "  F3             - raw mode (all symbols in hex codes)",
+    "  F4             - hexdump mode (like hexdump output)",
+    "  mouse scroll   - scroll text output",
+    "  q,^c,^d        - quit",
+    "  TAB            - switch between scroll and edit modes",
+    "    to change display/input (text/raw/hex) press Fx when scroll/edit",
+    "    in scroll mode keys are almost the same like for this help"
+    "  Text mode: in input and output all special symbols are like \\code",
+    "  Raw mode: output only in hex, input in dec, 0xhex, 0bbin, 0oct (space separated)",
+    "  Hexdump mode: output like hexdump, input only hex (with or without spaces)",
+    "",
+    "This help:",
+    "  ^p,<Up>        - scroll the viewport up by one row",
+    "  ^n,<Down>      - scroll the viewport down by one row",
+    "  ^l,<Left>      - scroll the viewport left by one column",
+    "  ^r,<Right>     - scroll the viewport right by one column",
+    "  h,<Home>       - scroll the viewport to top of file",
+    "  ^F,<PageDn>    - scroll to the next page",
+    "  ^B,<PageUp>    - scroll to the previous page",
+    "  e,<End>        - scroll the viewport to end of file",
+    0
+};
+
 /**
  * @brief cmdline - console reading process; runs as separate thread
  * @param arg - tty/socket device to write strings entered by user
@@ -331,7 +414,24 @@ void *cmdline(void* arg){
         int c = wgetch(cmd_win);
         bool processed = true;
         //DBG("wgetch got %d", c);
+        disptype dt = DISP_UNCHANGED;
         switch(c){ // common keys for both modes
+            case KEY_F(1): // help
+                DBG("\n\nASK for help\n\n");
+                popup_msg(msg_win, help);
+            break;
+            case KEY_F(2): // TEXT mode
+                DBG("\n\nIN TEXT mode\n\n");
+                dt = DISP_TEXT;
+            break;
+            case KEY_F(3): // RAW mode
+                DBG("\n\nIN RAW mode\n\n");
+                dt = DISP_RAW;
+            break;
+            case KEY_F(4): // HEX mode
+                DBG("\n\nIN HEX mode\n\n");
+                dt = DISP_HEX;
+            break;
             case KEY_MOUSE:
                 if(getmouse(&event) == OK){
                     if(event.bstate & (BUTTON4_PRESSED)) rolldown(); // wheel up
@@ -347,6 +447,10 @@ void *cmdline(void* arg){
             break;
             default:
                 processed = false;
+        }
+        if(dt != DISP_UNCHANGED){
+            if(insert_mode) change_disp(dt, DISP_UNCHANGED);
+            else change_disp(DISP_UNCHANGED, dt);
         }
         if(processed) continue;
         if(insert_mode){
@@ -396,7 +500,7 @@ void *cmdline(void* arg){
                 while(*ptr) forward_to_readline(*ptr++);
             }
         }else{
-            switch(c){
+            switch(c){ // TODO: add home/end
                 case KEY_UP: // roll down for one item
                     rolldown();
                 break;

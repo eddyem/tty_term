@@ -23,9 +23,10 @@
 #include <pthread.h>
 #include <asm-generic/termbits.h>
 #include <stdbool.h>
+#include <stdint.h>
 //#include "dbg.h"
 
-typedef enum{
+typedef enum{ // device: tty terminal, network socket or UNIX socket
     DEV_TTY,
     DEV_NETSOCKET,
     DEV_UNIXSOCKET,
@@ -55,10 +56,11 @@ typedef struct{
     int eollen;                 // length of `eol`
 } chardevice;
 
-char *ReadData(chardevice *d, int *l);
-int SendData(chardevice *d, char *str);
+char *geteol(int *s);
+char *ReadData(int *l);
+int SendData(const char *data, size_t len);
 void settimeout(int tms);
 int opendev(chardevice *d, char *path);
-void closedev(chardevice *d);
+void closedev();
 
 #endif // TTY_H__

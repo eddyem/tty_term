@@ -22,6 +22,13 @@
 #include "dbg.h"
 #include "ttysocket.h"
 
+typedef enum{ // display/input data as
+    DISP_TEXT,      // text (non-ASCII input and output as \xxx)
+    DISP_RAW,       // hex output as xx xx xx, input in as numbers in bin (0bxx), oct(0xx), hex (0xxx||0Xxx) or dec and letters
+    DISP_HEX,       // hexdump output, input in hex only (with or without spaces)
+    DISP_UNCHANGED  // old
+} disptype;
+
 void init_readline();
 void deinit_readline();
 void init_ncurses();

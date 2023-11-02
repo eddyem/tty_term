@@ -29,7 +29,7 @@ static chardevice conndev = {.dev = NULL, .mutex = PTHREAD_MUTEX_INITIALIZER, .n
 
 void signals(int signo){
     signal(signo, SIG_IGN);
-    closedev(&conndev);
+    closedev();
     deinit_ncurses();
     deinit_readline();
     DBG("Exit");
@@ -84,7 +84,7 @@ int main(int argc, char **argv){
     while(1){
         if(0 == pthread_mutex_lock(&conndev.mutex)){
             int l;
-            char *buf = ReadData(&conndev, &l);
+            char *buf = ReadData(&l);
             if(buf && l > 0){
                 char *eol = NULL, *estr = buf + l;
                 do{
