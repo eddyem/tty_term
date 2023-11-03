@@ -17,14 +17,20 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 
 #include "string_functions.h"
 
+// end of line - for text mode
+static char *eol = "\n";
+static int eollen = 1;
+
 // read text string and throw out all < 31 and > 126
-static inline const char *omit_nonletters(const char *line){
+static inline const char *omit_nonletters(disptype input_type, const char *line){
+    int start = (input_type == DISP_TEXT) ? 31 : 32; // remove spaces for RAW and HEX modes
     while(*line){
         char c = *line;
-        if(c > 31 && c < 127) break;
+        if(c > start && c < 127) break;
         ++line;
     }
     return line;
@@ -163,7 +169,7 @@ int convert_and_send(disptype input_type, const char *line){
     static char *buf = NULL;
     static size_t bufsiz = 0;
     size_t curpos = 0; // position in `buf`
-    line = omit_nonletters(line);
+    line = omit_nonletters(input_type, line);
     while(*line){
         if(curpos >= bufsiz){ // out ouptut buffer can't be larger than input
             bufsiz += BUFSIZ;
@@ -204,17 +210,28 @@ int convert_and_send(disptype input_type, const char *line){
                 return 0; // unknown display type
         }
         if(ch > -1) buf[curpos++] = ch;
-        line = omit_nonletters(line);
+        line = omit_nonletters(input_type, line);
     }
     // now insert EOL in text mode
     if(input_type == DISP_TEXT){
-        if(curpos+2 >= bufsiz){
+        if(curpos+eollen >= bufsiz){
             bufsiz += BUFSIZ;
             buf = realloc(buf, bufsiz);
         }
-        int l; char *e = geteol(&l);
-        snprintf(buf+curpos, l, "%s", e);
-        curpos += l;
+        snprintf(buf+curpos, eollen+1, "%s", eol);
+        curpos += eollen;
+        /*snprintf(buf+curpos, 7, "_TEST_");
+        curpos += 6;*/
     }
     return SendData(buf, curpos);
+}
+
+/**
+ * @brief changeeol - set EOL to given
+ * @param e - new end of line for text mode
+ * WARNING! This function doesn't call free(), so don't call it more than once
+ */
+void changeeol(const char *e){
+    eollen = strlen(e);
+    eol = strdup(e);
 }

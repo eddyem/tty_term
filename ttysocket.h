@@ -53,10 +53,8 @@ typedef struct{
     pthread_mutex_t mutex;      // reading/writing mutex
     char eol[3];                // end of line
     char seol[5];               // `eol` with doubled backslash (for print @ screen)
-    int eollen;                 // length of `eol`
 } chardevice;
 
-char *geteol(int *s);
 char *ReadData(int *l);
 int SendData(const char *data, size_t len);
 void settimeout(int tms);

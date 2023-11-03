@@ -53,8 +53,6 @@ int main(int argc, char **argv){
     }
     strcpy(conndev.eol, EOL);
     strcpy(conndev.seol, seol);
-    int eollen = strlen(EOL);
-    conndev.eollen = eollen;
     DBG("eol: %s, seol: %s", conndev.eol, conndev.seol);
     if(!G->ttyname){
         WARNX("You should point name");
@@ -86,17 +84,7 @@ int main(int argc, char **argv){
             int l;
             char *buf = ReadData(&l);
             if(buf && l > 0){
-                char *eol = NULL, *estr = buf + l;
-                do{
-                    eol = strstr(buf, EOL);
-                    if(eol){
-                        *eol = 0;
-                        ShowData(buf);
-                        buf = eol + eollen;
-                    }else{
-                        ShowData(buf);
-                    }
-                }while(eol && buf < estr);
+                ShowData(buf);
             }else if(l < 0){
                 pthread_mutex_unlock(&conndev.mutex);
                 ERRX("Device disconnected");

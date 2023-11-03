@@ -29,6 +29,7 @@
 #include <sys/un.h>  // unix socket
 
 #include "dbg.h"
+#include "string_functions.h"
 #include "ttysocket.h"
 
 static int sec = 0, usec = 100; // timeout
@@ -77,45 +78,6 @@ static int waittoread(int fd){
     return 0;
 }
 
-// substitute all EOL's by '\n'
-static size_t rmeols(){
-    if(!device){
-        DBG("d is NULL");
-        return 0;
-    }
-    TTY_descr2 *D = device->dev;
-    if(!D || D->comfd < 0){
-        DBG("D bad");
-        return 0;
-    }
-    if(0 == strcmp(device->eol, "\n")){
-        DBG("No subs need");
-        return D->buflen; // don't need to do this
-    }
-    int L = strlen(D->buf);
-    char *newbuf = MALLOC(char, L), *ptr = D->buf, *eptr = D->buf + L;
-    while(ptr < eptr){
-        char *eol = strstr(ptr, device->eol);
-        if(eol){
-            eol[0] = '\n';
-            eol[1] = 0;
-        }
-        strcat(newbuf, ptr);
-        if(!eol) break;
-        ptr = eol + device->eollen;
-    }
-    strcpy(D->buf, newbuf);
-    FREE(newbuf);
-    D->buflen = strlen(D->buf);
-    return D->buflen;
-}
-
-char *geteol(int *s){
-    if(!device) return NULL;
-    *s = device->eollen;
-    return device->eol;
-}
-
 // get data drom TTY
 static char *getttydata(int *len){
     if(!device || !device->dev) return NULL;
@@ -138,15 +100,11 @@ static char *getttydata(int *len){
         }
         ptr += l; L += l;
         length -= l;
-        if(L >= device->eollen && 0 == strcmp(&ptr[-(device->eollen)], device->eol)){ // found end of line
-            break;
-        }
     }while(length);
     D->buflen = L;
     D->buf[L] = 0;
     if(len) *len = L;
     if(!L) return NULL;
-    rmeols(device);
     DBG("buffer len: %zd, content: =%s=", D->buflen, D->buf);
     return D->buf;
 }
@@ -163,7 +121,6 @@ static char *getsockdata(int *len){
             ptr = D->buf;
             ptr[n] = 0;
             D->buflen = n;
-            n = rmeols(device);
             DBG("got %d: ..%s..", n, ptr);
         }else{
             DBG("Got nothing");
@@ -389,7 +346,8 @@ static TTY_descr2* opentty(){
     }
     descr->tty = descr->oldtty;
     descr->tty.c_lflag = 0; // ~(ICANON | ECHO | ECHOE | ISIG)
-    descr->tty.c_iflag = 0;
+    descr->tty.c_iflag = 0; // don't do any changes in input stream
+    descr->tty.c_oflag = 0; // don't do any changes in output stream
     descr->tty.c_cflag = BOTHER | flags |CREAD|CLOCAL;
     descr->tty.c_ispeed = device->speed;
     descr->tty.c_ospeed = device->speed;
@@ -399,10 +357,6 @@ static TTY_descr2* opentty(){
     }
     ioctl(descr->comfd, TCGETS2, &descr->tty);
     device->speed = descr->tty.c_ispeed;
-#ifdef EBUG
-    printf("ispeed: %d, ospeed: %d, cflag=%d (BOTHER=%d)\n", descr->tty.c_ispeed, descr->tty.c_ospeed, descr->tty.c_cflag&CBAUD, BOTHER);
-    if(system("stty -F /dev/ttyUSB0")) WARN("system()");
-#endif
     return descr;
 someerr:
     FREE(descr->format);
@@ -453,6 +407,7 @@ int opendev(chardevice *d, char *path){
             return FALSE;
         }
     }
+    changeeol(device->eol); // allow string functions to know EOL
     return TRUE;
 }
 

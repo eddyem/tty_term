@@ -21,3 +21,4 @@
 #include "ncurses_and_readline.h"
 
 int convert_and_send(disptype input_type, const char *line);
+void changeeol(const char *e);
