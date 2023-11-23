@@ -26,7 +26,10 @@ typedef enum{ // display/input data as
     DISP_TEXT,      // text (non-ASCII input and output as \xxx)
     DISP_RAW,       // hex output as xx xx xx, input in as numbers in bin (0bxx), oct(0xx), hex (0xxx||0Xxx) or dec and letters
     DISP_HEX,       // hexdump output, input in hex only (with or without spaces)
-    DISP_UNCHANGED  // old
+    DISP_RTURAW,    // modbus RTU (only to send): first number is node address, all other - data; CRC calculated
+    DISP_RTUHEX,    // RTU, input in hex (in raw - like RAW)
+    DISP_UNCHANGED, // old
+    DISP_SIZE       // sizeof
 } disptype;
 
 void init_readline();

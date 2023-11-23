@@ -79,7 +79,7 @@ void popup_msg(WINDOW *parent, const char *const *msg){
     getmaxyx(parent, maxy, maxx);
     // borders
     //x0 = (maxx > 12) ? 2 : ((maxx > 9) ? 1 : 0);
-    x0 = (maxx > 80) ?  maxx/2-40 : maxx / 32;
+    x0 = (maxx > 80) ?  maxx/2-60 : maxx / 32;
     y0 = (maxy > 20) ? 2 : ((maxy > 16) ? 1 : 0);
     int wide = maxx - 2*x0;
     int high = maxy - 2*y0;

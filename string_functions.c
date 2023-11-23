@@ -27,7 +27,7 @@ static int eollen = 1;
 
 // read text string and throw out all < 31 and > 126
 static inline const char *omit_nonletters(disptype input_type, const char *line){
-    int start = (input_type == DISP_TEXT) ? 31 : 32; // remove spaces for RAW and HEX modes
+    int start = (input_type == DISP_TEXT) ? 31 : 32; // remove spaces for non-TEXT modes
     while(*line){
         char c = *line;
         if(c > start && c < 127) break;
@@ -159,6 +159,17 @@ static inline const char *getspec(const char *line, int *ch){
     *ch = got;
     return line;
 }
+/*
+static inline const char* getu32(const char *str, uint32_t *val){
+    char *eptr;
+    if(!str) return NULL;
+    long ll = strtol(str, &eptr, 0);
+    if(ll < 0 || ll > UINT32_MAX){ // wrong number
+        return NULL;
+    }
+    if(val) *val = (uint32_t)ll;
+    return omit_nonletters(DISP_RTU, eptr);
+}*/
 
 /**
  * @brief convert_and_send - convert input line and send it (in text mode add `eol`)
@@ -171,11 +182,14 @@ int convert_and_send(disptype input_type, const char *line){
     size_t curpos = 0; // position in `buf`
     line = omit_nonletters(input_type, line);
     DBG("got: '%s' to send", line);
-    while(*line){
-        if(curpos >= bufsiz){ // out ouptut buffer can't be larger than input
+    void CHKbufsiz(size_t sz){
+        if(curpos + sz >= bufsiz){ // out ouptut buffer can't be larger than input
             bufsiz += BUFSIZ;
             buf = realloc(buf, bufsiz);
         }
+    }
+    while(*line){
+        CHKbufsiz(1);
         int ch = -1;
         switch(input_type){
             case DISP_TEXT: // only check for '\'
@@ -183,6 +197,7 @@ int convert_and_send(disptype input_type, const char *line){
                 if(ch == '\\') line = getspec(line, &ch);
             break;
             case DISP_RAW: // read next uint8_t and put into buffer
+            case DISP_RTURAW: // the same (but calculate CRC at the end)
                 ch = *line++;
                 if(ch == '0'){ // number: 0, 0xHH, 0OOO, 0bBBBBBBBB
                     ch = *line;
@@ -205,6 +220,7 @@ int convert_and_send(disptype input_type, const char *line){
                 } // else - letter (without escape-symbols!)
             break;
             case DISP_HEX: // read next 2 hex bytes and put into buffer
+            case DISP_RTUHEX: // the same (but calculate CRC at the end)
                 line = gethex(line, &ch);
             break;
             default:
@@ -222,6 +238,20 @@ int convert_and_send(disptype input_type, const char *line){
         memcpy(buf+curpos, eol, eollen);
         curpos += eollen;
         DBG("Add EOL");
+    }else if(input_type == DISP_RTURAW || input_type == DISP_RTUHEX){ // calculate CRC
+        CHKbufsiz(2);
+        uint16_t crc = 0xFFFF;
+        for(size_t pos = 0; pos < curpos; ++pos){
+            crc ^= (uint16_t)buf[pos];
+            for(int i = 8; i; --i){
+                if((crc & 1)){
+                    crc >>= 1;
+                    crc ^= 0xA001;
+                }else crc >>= 1;
+            }
+        }
+        buf[curpos++] = crc & 0xff; // Lo
+        buf[curpos++] = crc >> 8; // Hi
     }
     return SendData(buf, curpos);
 }

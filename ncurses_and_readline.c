@@ -39,10 +39,11 @@
 #include "string_functions.h"
 
 enum { // using colors
-    BKG_NO = 1,
-    BKGMARKED_NO = 2,
-    NORMAL_NO = 3,
-    MARKED_NO = 4
+    BKG_NO = 1,   // normal status string
+    BKGMARKED_NO, // marked status string
+    NORMAL_NO,    // normal output
+    MARKED_NO,    // marked output
+    ERROR_NO      // error displayed
 };
 #define COLOR(x)  COLOR_PAIR(x ## _NO)
 
@@ -55,7 +56,7 @@ static bool should_exit = false;
 
 static disptype disp_type = DISP_TEXT;  // type of displaying data
 static disptype input_type = DISP_TEXT; // parsing type of input data
-const char *dispnames[] = {"TEXT", "RAW", "HEX"};
+const char *dispnames[DISP_SIZE] = {"TEXT", "RAW", "HEX", "RTU (RAW)", "RTU (HEX)", "Error"};
 
 static chardevice *dtty = NULL;
 
@@ -122,13 +123,25 @@ static void forward_to_readline(char c){
 }
 
 /**
+ * @brief show_err - show error on status string
+ * @param text - text to display
+ */
+static void show_err(const char *text){
+    wclear(sep_win);
+    wattron(sep_win, COLOR(ERROR));
+    wprintw(sep_win, "%s", text);
+    wattroff(sep_win, COLOR(ERROR));
+    wrefresh(sep_win);
+}
+
+/**
  * @brief ptrtobuf - get n'th string of `formatted_buffer`
  * @param lineno - line number
  * @return pointer to n'th string in formatted buffer
  */
 static char *ptrtobuf(size_t lineno){
     if(!linebuffer->line_array_idx){
-        WARNX("line_array_idx not inited");
+        show_err("line_array_idx not inited");
         return NULL;
     }
     if(lineno > linebuffer->lnarr_curr) return NULL;
@@ -523,11 +536,12 @@ void init_ncurses(){
     }
     if(!msg_win || !sep_win || !cmd_win)
         fail_exit("Failed to allocate windows");
-    wtimeout(cmd_win, 4);
+    wtimeout(cmd_win, 5);
     keypad(cmd_win, TRUE);
     if(has_colors()){
         init_pair(BKG_NO, COLOR_WHITE, COLOR_BLUE);
         init_pair(BKGMARKED_NO, 1, COLOR_BLUE); // COLOR_RED used in my usefull_macros
+        init_pair(ERROR_NO, COLOR_BLACK, 1);
         init_pair(NORMAL_NO, COLOR_WHITE, COLOR_BLACK);
         init_pair(MARKED_NO, COLOR_CYAN, COLOR_BLACK);
         wbkgd(sep_win, COLOR(BKG));
@@ -560,9 +574,9 @@ static void got_command(char *line){
         if(!*line) return; // zero length
         if(!previous_line || strcmp(previous_line, line)) add_history(line); // omit repeats
         FREE(previous_line);
-        if(convert_and_send(input_type, line) == -1){
-            ERRX("Device disconnected");
-        }
+        int res = convert_and_send(input_type, line);
+        if(res == 0) show_err("Wrong data format");
+        else if(res == -1) ERRX("Device disconnected");
         previous_line = line;
     }
 }
@@ -588,7 +602,7 @@ static void change_disp(disptype in, disptype out){
         input_type = in;
         DBG("input -> %s", dispnames[in]);
     }
-    if(out >= DISP_TEXT && out < DISP_UNCHANGED && out != disp_type){
+    if(out >= DISP_TEXT && out <= DISP_HEX && out != disp_type){
         disp_type = out;
         DBG("output -> %s", dispnames[out]);
         resize(); // reformat everything
@@ -636,6 +650,8 @@ static const char *help[] = {
     "  F2             - text mode",
     "  F3             - raw mode (all symbols in hex codes)",
     "  F4             - hexdump mode (like hexdump output)",
+    "  F5             - modbus RTU mode (only for sending), input like RAW: ID data",
+    "  F6             - modbus RTU mode (only for sending), input like HEX: ID data",
     "  mouse scroll   - scroll text output",
     "  q,^c,^d        - quit",
     "  TAB            - switch between scroll and edit modes",
@@ -689,6 +705,14 @@ void *cmdline(void* arg){
             case KEY_F(4): // HEX mode
                 DBG("\n\nIN HEX mode\n\n");
                 dt = DISP_HEX;
+            break;
+            case KEY_F(5): // RTU mode
+                DBG("\n\nIN RTU RAW mode\n\n");
+                dt = DISP_RTURAW;
+            break;
+            case KEY_F(6): // RTU mode
+                DBG("\n\nIN RTU HEX mode\n\n");
+                dt = DISP_RTUHEX;
             break;
             case KEY_MOUSE:
                 if(getmouse(&event) == OK){
