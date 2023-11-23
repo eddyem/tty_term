@@ -79,13 +79,13 @@ static int waittoread(int fd){
 }
 
 // get data drom TTY
-static char *getttydata(int *len){
+static uint8_t *getttydata(int *len){
     if(!device || !device->dev) return NULL;
     TTY_descr2 *D = device->dev;
     if(D->comfd < 0) return NULL;
     int L = 0;
-    int length = D->bufsz;
-    char *ptr = D->buf;
+    int length = D->bufsz - 1; // -1 for terminating zero
+    uint8_t *ptr = D->buf;
     int s = 0;
     do{
         if(!(s = waittoread(D->comfd))) break;
@@ -102,18 +102,18 @@ static char *getttydata(int *len){
         length -= l;
     }while(length);
     D->buflen = L;
-    D->buf[L] = 0;
+    D->buf[L] = 0; // for text buffers
     if(len) *len = L;
     if(!L) return NULL;
     DBG("buffer len: %zd, content: =%s=", D->buflen, D->buf);
     return D->buf;
 }
 
-static char *getsockdata(int *len){
+static uint8_t *getsockdata(int *len){
     if(!device || !device->dev) return NULL;
     TTY_descr2 *D = device->dev;
     if(D->comfd < 0) return NULL;
-    char *ptr = NULL;
+    uint8_t *ptr = NULL;
     int n = waittoread(D->comfd);
     if(n == 1){
         n = read(D->comfd, D->buf, D->bufsz-1);
@@ -137,10 +137,10 @@ static char *getsockdata(int *len){
  * @param len (o) - length of data read (-1 if device disconnected)
  * @return NULL or string
  */
-char *ReadData(int *len){
+uint8_t *ReadData(int *len){
     if(!device || !device->dev) return NULL;
     if(len) *len = -1;
-    char *r = NULL;
+    uint8_t *r = NULL;
     switch(device->type){
         case DEV_TTY:
             r = getttydata(len);
@@ -165,14 +165,15 @@ char *ReadData(int *len){
  * @param data - buffer with data
  * @return 0 if error or empty string, -1 if disconnected
  */
-int SendData(const char *data, size_t len){
+int SendData(const uint8_t *data, size_t len){
     if(!device) return -1;
     if(!data || len == 0) return 0;
     int ret = 0;
+    DBG("Send %d bytes", len);
     if(0 == pthread_mutex_lock(&device->mutex)){
         switch(device->type){
             case DEV_TTY:
-                if(write_tty(device->dev->comfd, data, len)) ret = 0;
+                if(write_tty(device->dev->comfd, (const char*)data, len)) ret = 0;
                 else ret = len;
             break;
             case DEV_NETSOCKET:
@@ -199,7 +200,7 @@ static const int socktypes[] = {SOCK_STREAM, SOCK_RAW, SOCK_RDM, SOCK_SEQPACKET,
 static TTY_descr2* opensocket(){
     if(!device) return FALSE;
     TTY_descr2 *descr = MALLOC(TTY_descr2, 1); // only for `buf` and bufsz/buflen
-    descr->buf = MALLOC(char, BUFSIZ);
+    descr->buf = MALLOC(uint8_t, BUFSIZ);
     descr->bufsz = BUFSIZ;
     // now try to open a socket
     descr->comfd = -1;
@@ -334,7 +335,7 @@ static TTY_descr2* opentty(){
     tcflag_t flags;
     descr->format = parse_format(device->port, &flags);
     if(!descr->format) goto someerr;
-    descr->buf = MALLOC(char, BUFSIZ);
+    descr->buf = MALLOC(uint8_t, BUFSIZ);
     descr->bufsz = BUFSIZ-1;
     if((descr->comfd = open(descr->portname, O_RDWR|O_NOCTTY)) < 0){
         WARN(_("Can't use port %s"), descr->portname);

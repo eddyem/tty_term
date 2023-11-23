@@ -75,12 +75,14 @@ static void end_popup(void){
  * Display a temporary window, e.g., to display a help-message.
  */
 void popup_msg(WINDOW *parent, const char *const *msg){
-    int x0 = 4;
-    int y0 = 2;
-    int y1 = 0, x1 = 0;
-    int y2 = 0;
-    int wide = getmaxx(parent) - ((x0 + 1) * 2);
-    int high = getmaxy(parent) - ((y0 + 1) * 2);
+    int maxx, maxy, x0, y0, x1 = 0, y1 = 0, y2 = 0;
+    getmaxyx(parent, maxy, maxx);
+    // borders
+    //x0 = (maxx > 12) ? 2 : ((maxx > 9) ? 1 : 0);
+    x0 = (maxx > 80) ?  maxx/2-40 : maxx / 32;
+    y0 = (maxy > 20) ? 2 : ((maxy > 16) ? 1 : 0);
+    int wide = maxx - 2*x0;
+    int high = maxy - 2*y0;
     WINDOW *help;
     WINDOW *data;
     int n;
@@ -96,17 +98,14 @@ void popup_msg(WINDOW *parent, const char *const *msg){
     length = n;
     last_x = width - wide + 4;
 
-    if ((help = newwin(high, wide, y0, x0)) == 0)
-    return;
-    if ((data = newpad(length + 1, width + 1)) == 0) {
-    delwin(help);
-    return;
+    if((help = newwin(high, wide, y0, x0)) == 0) return;
+    if((data = newpad(length + 1, width + 1)) == 0){
+        delwin(help);
+        return;
     }
 
     begin_popup();
-
     keypad(data, TRUE);
-
     for (n = 0; n < length; ++n){
         waddstr(data, msg[n]);
         if ((n + 1) < length) waddch(data, '\n');
@@ -175,7 +174,7 @@ void popup_msg(WINDOW *parent, const char *const *msg){
         werase(help);
         box(help, 0, 0);
         wnoutrefresh(help);
-        pnoutrefresh(data, y1, x1, y0 + 1, x0 + 1, high, wide);
+        pnoutrefresh(data, y1, x1, y0+1, x0+1,  y0+high-2, x0+wide-2);
         doupdate();
     } while ((ch = wgetch(data)) != ERR && ch != QUIT && ch != ESCAPE);
     werase(help);

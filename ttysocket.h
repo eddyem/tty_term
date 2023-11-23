@@ -39,7 +39,7 @@ typedef struct {
     struct termios2 oldtty; // TTY flags for previous port settings
     struct termios2 tty;    // TTY flags for current settings
     int comfd;              // TTY file descriptor
-    char *buf;              // buffer for data read
+    uint8_t *buf;           // buffer for data read
     size_t bufsz;           // size of buf
     size_t buflen;          // length of data read into buf
 } TTY_descr2;
@@ -55,8 +55,8 @@ typedef struct{
     char seol[5];               // `eol` with doubled backslash (for print @ screen)
 } chardevice;
 
-char *ReadData(int *l);
-int SendData(const char *data, size_t len);
+uint8_t *ReadData(int *l);
+int SendData(const uint8_t *data, size_t len);
 void settimeout(int tms);
 int opendev(chardevice *d, char *path);
 void closedev();

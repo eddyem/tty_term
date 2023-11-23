@@ -32,7 +32,7 @@ void signals(int signo){
     closedev();
     deinit_ncurses();
     deinit_readline();
-    DBG("Exit");
+    DBG("Exit by signal %d", signo);
     exit(signo);
 }
 
@@ -82,16 +82,16 @@ int main(int argc, char **argv){
     while(1){
         if(0 == pthread_mutex_lock(&conndev.mutex)){
             int l;
-            char *buf = ReadData(&l);
+            uint8_t *buf = ReadData(&l);
             if(buf && l > 0){
-                ShowData(buf);
+                AddData(buf, l);
             }else if(l < 0){
                 pthread_mutex_unlock(&conndev.mutex);
                 ERRX("Device disconnected");
             }
             pthread_mutex_unlock(&conndev.mutex);
-            usleep(1000);
         }
+        usleep(1000);
     }
     // never reached
     return 0;

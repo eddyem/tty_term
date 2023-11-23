@@ -34,6 +34,6 @@ void deinit_readline();
 void init_ncurses();
 void deinit_ncurses();
 void *cmdline(void* arg);
-void ShowData(const char *text);
+void AddData(const uint8_t *data, int len);
 
 #endif // NCURSES_AND_READLINE_H__

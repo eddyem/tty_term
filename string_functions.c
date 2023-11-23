@@ -166,10 +166,11 @@ static inline const char *getspec(const char *line, int *ch){
  * @return amount of bytes sent, 0 if error or -1 if disconnect
  */
 int convert_and_send(disptype input_type, const char *line){
-    static char *buf = NULL;
+    static uint8_t *buf = NULL;
     static size_t bufsiz = 0;
     size_t curpos = 0; // position in `buf`
     line = omit_nonletters(input_type, line);
+    DBG("got: '%s' to send", line);
     while(*line){
         if(curpos >= bufsiz){ // out ouptut buffer can't be larger than input
             bufsiz += BUFSIZ;
@@ -218,10 +219,9 @@ int convert_and_send(disptype input_type, const char *line){
             bufsiz += BUFSIZ;
             buf = realloc(buf, bufsiz);
         }
-        snprintf(buf+curpos, eollen+1, "%s", eol);
+        memcpy(buf+curpos, eol, eollen);
         curpos += eollen;
-        /*snprintf(buf+curpos, 7, "_TEST_");
-        curpos += 6;*/
+        DBG("Add EOL");
     }
     return SendData(buf, curpos);
 }

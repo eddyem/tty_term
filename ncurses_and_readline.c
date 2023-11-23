@@ -30,6 +30,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+//#include <signal.h>
+
 #include "dbg.h"
 #include "ttysocket.h"
 #include "ncurses_and_readline.h"
@@ -43,6 +45,7 @@ enum { // using colors
     MARKED_NO = 4
 };
 #define COLOR(x)  COLOR_PAIR(x ## _NO)
+
 
 // Keeps track of the terminal mode so we can reset the terminal if needed on errors
 static bool visual_mode = false;
@@ -68,15 +71,33 @@ static WINDOW *msg_win; // Message window
 static WINDOW *sep_win; // Separator line above the command (readline) window
 static WINDOW *cmd_win; // Command (readline) window
 
-// string list
-typedef struct _Line{
-    int Nline;
-    char *contents;
-    struct _Line *prev, *next;
-} Line;
-// head of list, current item and first line on screen
-Line *head = NULL, *curr = NULL, *firstline = NULL;
-int nr_lines = 0; // total anount of data portions @ input
+// amount of lines in line_arary
+//#define LINEARRSZ   (BUFSIZ/100)
+#define LINEARRSZ   3
+// formatted buffer initial size
+#define FBUFSIZ     30
+// raw buffer initial size
+#define RBUFSIZ     30
+// amount of spaces and delimeters in hexview string (address + 2 lines + 3 additional spaces)
+#define HEXDSPACES   (13)
+// maximal columns in line
+#define MAXCOLS      (512)
+
+typedef struct{
+    char *formatted_buffer; // formatted buffer, ptrtobuf(i) returns i'th string
+    size_t fbuf_size;       // size of `formatted_buffer` in bytes (zero-terminated lines)
+    size_t fbuf_curr;       // current size of data in buffer
+    size_t *line_array_idx; // indexes of starting symbols of each line in `formatted_buffer`
+    size_t lnarr_size;      // full size of `line_array_idx`
+    size_t lnarr_curr;      // current index in `line_array_idx` (last string)
+    size_t linelen;         // max length of one line (excluding terminated 0)
+    size_t lastlen;         // length of last string
+} linebuf_t;
+
+static linebuf_t *linebuffer = NULL; // string buffer for current representation
+static uint8_t *raw_buffer = NULL; // raw buffer for incoming data
+static size_t rawbufsz = 0, rawbufcur = 0; // full raw buffer size and current bytes amount
+static size_t firstdisplineno = 0; // current first displayed line number (when scrolling)
 
 static unsigned char input; // Input character for readline
 
@@ -100,6 +121,23 @@ static void forward_to_readline(char c){
     rl_callback_read_char();
 }
 
+/**
+ * @brief ptrtobuf - get n'th string of `formatted_buffer`
+ * @param lineno - line number
+ * @return pointer to n'th string in formatted buffer
+ */
+static char *ptrtobuf(size_t lineno){
+    if(!linebuffer->line_array_idx){
+        WARNX("line_array_idx not inited");
+        return NULL;
+    }
+    if(lineno > linebuffer->lnarr_curr) return NULL;
+    size_t idx = linebuffer->line_array_idx[lineno];
+    if(idx > linebuffer->fbuf_curr) return NULL;
+    return (linebuffer->formatted_buffer + idx);
+}
+
+#if 0
 // functions to modify output data
 static char *text_putchar(char *next){
     char c = *next++;
@@ -123,39 +161,36 @@ static char *hex_putchar(char *next){
     waddch(msg_win, *next);
     return next+1;
 }
+#endif
 
-static void msg_win_redisplay(bool for_resize){
+/**
+ * @brief msg_win_redisplay - redisplay message window
+ * @param group_refresh - true for grouping refresh (don't call doupdate())
+ */
+static void msg_win_redisplay(bool group_refresh){
+    if(!linebuffer) return;
     werase(msg_win);
-    Line *l = firstline;
-    //static char *buf = NULL;
-    int nlines = 0; // total amount of lines @ output
     int linemax = LINES - 2;
-    char *(*putfn)(char *);
-    switch(disp_type){
-        case DISP_RAW:
-            putfn = raw_putchar;
-        break;
-        case DISP_HEX:
-            putfn = hex_putchar;
-        break;
-        default:
-            putfn = text_putchar;
+    if(firstdisplineno >= linebuffer->lnarr_curr){
+        size_t l = (linemax > 1) ? linemax / 2 : 1;
+        if(linebuffer->lnarr_curr < l) firstdisplineno = 0;
+        else firstdisplineno = linebuffer->lnarr_curr - l;
     }
-    for(; l && (nlines < linemax); l = l->next){
-        wmove(msg_win, nlines, 0);
-        //size_t contlen = strlen(l->contents) + 128;
-        //buf = realloc(buf, contlen);
-        char *ptr = l->contents;
-        while((ptr = putfn(ptr)) && *ptr && nlines < linemax){
-            nlines = msg_win->_cury;
-        }
-        ++nlines;
+    size_t lastl = firstdisplineno + linemax;
+    if(lastl > linebuffer->lnarr_curr+1) lastl = linebuffer->lnarr_curr+1;
+    int i = 0;
+    for(size_t curline = firstdisplineno; curline < lastl; ++curline, ++i){
+        mvwprintw(msg_win, i, 0, "%s", linebuffer->formatted_buffer + linebuffer->line_array_idx[curline]);
     }
-    if(for_resize) wnoutrefresh(msg_win);
+    if(group_refresh) wnoutrefresh(msg_win);
     else wrefresh(msg_win);
 }
 
-static void cmd_win_redisplay(bool for_resize){
+/**
+ * @brief cmd_win_redisplay - redisplay command (input) window
+ * @param group_refresh - true for grouping refresh (don't call doupdate())
+ */
+static void cmd_win_redisplay(bool group_refresh){
     int cursor_col = 3 + strlen(dispnames[input_type]) + rl_point; // " > " width is 3
     werase(cmd_win);
     int x = 0, maxw = COLS-2;
@@ -167,7 +202,7 @@ static void cmd_win_redisplay(bool for_resize){
     snprintf(abuf, 4096, "%s > %s", dispnames[input_type], rl_line_buffer);
     waddstr(cmd_win, abuf+x);
     wmove(cmd_win, 0, cursor_col);
-    if(for_resize) wnoutrefresh(cmd_win);
+    if(group_refresh) wnoutrefresh(cmd_win);
     else wrefresh(cmd_win);
     keypad(cmd_win, TRUE);
     if(insert_mode) curs_set(2);
@@ -178,7 +213,11 @@ static void readline_redisplay(){
     cmd_win_redisplay(false);
 }
 
-static void show_mode(bool for_resize){
+/**
+ * @brief show_mode - redisplay middle string (with work mode and settings) + call cmd_win_redisplay
+ * @param group_refresh - true for grouping refresh (don't call doupdate())
+ */
+static void show_mode(bool group_refresh){
     static const char *insmodetext = "INSERT (F1 - help)";
     wclear(sep_win);
     char buf[128];
@@ -213,44 +252,231 @@ static void show_mode(bool for_resize){
     wprintw(sep_win, "%s ", dispnames[disp_type]);
     wattroff(sep_win, COLOR(BKGMARKED));
     wprintw(sep_win, "%s", buf);
-    if(for_resize) wnoutrefresh(sep_win);
+    if(group_refresh) wnoutrefresh(sep_win);
     else wrefresh(sep_win);
-    cmd_win_redisplay(for_resize);
+    cmd_win_redisplay(group_refresh);
 }
 
 /**
- * @brief ShowData - show string on display
- * @param text - text string
+ * @brief redisplay_addline - redisplay after line adding
+ * @param group_refresh - true for grouping refresh (don't call doupdate())
  */
-void ShowData(const char *text){
-    if(!text) return;
-    if(!*text) text = " "; // empty string
-    Line *lp = malloc(sizeof(Line));
-    lp->contents = strdup(text);
-    lp->prev = curr;
-    lp->next = NULL;
-    lp->Nline = nr_lines++;
-    if(!curr || !head){
-        head = curr = firstline = lp;
-    }else
-        curr->next = lp;
-    curr = lp;
-    // roll back to show last input
-    if(curr->prev){
-        firstline = curr;
-        int totalln = (strlen(firstline->contents) - 1)/COLS + 1;
-        while(firstline->prev){
-            totalln += (strlen(firstline->prev->contents) - 1)/COLS + 1;
-            if(totalln > LINES-2) break;
-            firstline = firstline->prev;
-        }
+static void redisplay_addline(){
+    // redisplay only if previous line was on screen
+    size_t lastno = firstdisplineno + LINES - 2; // number of first line out of screen
+    if(lastno < linebuffer->lnarr_curr){
+        return;
+    }
+    else if(lastno == linebuffer->lnarr_curr){ // scroll text by one line up
+        ++firstdisplineno;
     }
     msg_win_redisplay(true);
     show_mode(true);
     doupdate();
 }
 
+/**
+ * @brief linebuf_free - clear memory of `linebuffer`
+ */
+static void linebuf_free(){
+    if(!linebuffer) return;
+    FREE(linebuffer->formatted_buffer);
+    FREE(linebuffer->line_array_idx);
+    FREE(linebuffer);
+}
+
+/**
+ * @brief chksizes - check sizes of buffers and enlarge them if need
+ */
+static void chksizes(){
+    size_t addportion = MAXCOLS*3;
+    if(rawbufsz - rawbufcur < addportion){ // raw buffer always should be big enough
+        rawbufsz += (addportion > RBUFSIZ) ? addportion : RBUFSIZ;
+        DBG("Enlarge raw buffer to %zd", rawbufsz);
+        raw_buffer = realloc(raw_buffer, rawbufsz);
+    }
+    if(linebuffer->fbuf_size - linebuffer->fbuf_curr < addportion){ // realloc buffer if need
+        linebuffer->fbuf_size += (addportion > FBUFSIZ) ? addportion : FBUFSIZ;
+        DBG("Enlarge formatted buffer to %zd", linebuffer->fbuf_size);
+        linebuffer->formatted_buffer = realloc(linebuffer->formatted_buffer, linebuffer->fbuf_size);
+    }
+    if(linebuffer->lnarr_size - linebuffer->lnarr_curr < 3){
+        linebuffer->lnarr_size += LINEARRSZ;
+        DBG("Enlarge line array buffer to %zd", linebuffer->lnarr_size);
+        linebuffer->line_array_idx = realloc(linebuffer->line_array_idx, linebuffer->lnarr_size * sizeof(size_t));
+    }
+}
+
+/**
+ * @brief linebuf_new - allocate data for new linebuffer
+ */
+static void linebuf_new(){
+    linebuf_free();
+    linebuffer = MALLOC(linebuf_t, 1);
+    linebuffer->fbuf_size = FBUFSIZ;
+    linebuffer->formatted_buffer = MALLOC(char, linebuffer->fbuf_size);
+    linebuffer->lnarr_size = LINEARRSZ;
+    linebuffer->line_array_idx = MALLOC(size_t, linebuffer->lnarr_size);
+    linebuffer->fbuf_curr = 0;
+    linebuffer->lnarr_curr = 0;
+    linebuffer->lastlen = 0;
+    int maxcols = (COLS > MAXCOLS) ? MAXCOLS : COLS;
+    // in hexdump view linelen is amount of symbols in one string, lastlen - amount of already printed symbols
+    if(disp_type == DISP_HEX){ // calculate minimal line width and ;
+        int n = maxcols - HEXDSPACES; // space for data
+        n -= n/8; // spaces after each 8 symbols
+        n /= 4; // hex XX + space + symbol view
+        // n should be 1..4, 8 or 16x
+        if(n < 1) n = 1; // minimal - one symbol per string
+        else if(n > 4){
+            if(n < 8) n = 4;
+            //else if(n < 16) n = 8;
+            else n -= n % 8;
+        }
+        linebuffer->linelen = n;
+    }else linebuffer->linelen = maxcols;
+    DBG("=====>> COLS=%d, maxcols=%d, linelen=%zd", COLS, maxcols, linebuffer->linelen);
+    linebuffer->line_array_idx[0] = 0; // initialize first line
+    chksizes();
+}
+
+/**
+ * @brief finalize_line - finalize last line in linebuffer & increase buffer sizes if nesessary
+ */
+static void finalize_line(){
+    chksizes();
+    linebuffer->formatted_buffer[linebuffer->fbuf_curr++] = 0; // finalize line
+    linebuffer->formatted_buffer[linebuffer->fbuf_curr] = 0; // and clear new line (`realloc` can generate some trash)
+    DBG("Current line is %s, no=%zd, len=%zd", linebuffer->formatted_buffer + linebuffer->line_array_idx[linebuffer->lnarr_curr], linebuffer->lnarr_curr, linebuffer->lastlen);
+    ++linebuffer->lnarr_curr;
+    linebuffer->lastlen = 0;
+    linebuffer->line_array_idx[linebuffer->lnarr_curr] = linebuffer->fbuf_curr;
+    redisplay_addline();
+}
+
+/**
+ * @brief FormatData - get new data portion and format it into displayed buffer
+ * @param data - data start pointer in `raw_buffer`
+ * @param len  - length of data portion
+ */
+void FormatData(const uint8_t *data, int len){
+    if(COLS > MAXCOLS-1) ERRX("Too wide column");
+    if(!data || len < 1) return;
+    chksizes();
+    DBG("Got %d bytes to process", len);
+    while(len){
+        // count amount of symbols in `data` to display until line is over
+        int Nsymbols = 0, curidx = 0;
+        int nrest = linebuffer->linelen - linebuffer->lastlen; // n symbols left in string for text/raw
+        switch(disp_type){
+            case DISP_TEXT: // 1 or 4 bytes per symbol
+                while(nrest > 0 && curidx < len){
+                    uint8_t c = data[curidx++];
+                    if(c == '\n'){ // finish string
+                        ++Nsymbols;
+                        break;
+                    }
+                    if(c < 32 || c > 126) nrest -= 4; // "\xXX"
+                    else --nrest;
+                    if(nrest > -1) ++Nsymbols;
+                }
+            break;
+            case DISP_RAW: // 3 bytes per symbol
+                Nsymbols = nrest / 3;
+            break;
+            case DISP_HEX:
+                Nsymbols = nrest;
+            break;
+            default:
+            break;
+        }
+        if(Nsymbols > len) Nsymbols = len;
+        if(Nsymbols == 0){
+            DBG("No more plase in line - finalize");
+            finalize_line();
+            continue;
+        }
+        DBG("Process %d symbols", Nsymbols);
+        if(disp_type != DISP_HEX){
+            char *curptr = linebuffer->formatted_buffer+linebuffer->fbuf_curr;
+            for(int i = 0; i < Nsymbols; ++i){
+                uint8_t c = data[i];
+                int nadd = 0;
+                switch(disp_type){
+                    case DISP_TEXT:
+                        if(c == '\n'){ // finish line
+                            DBG("Finish line, nadd=%d, i=%d!", nadd, i);
+                            finalize_line();
+                            break;
+                        }
+                        if(c < 32 || c > 126) nadd = sprintf(curptr, "\\x%.2X", c);
+                        else{
+                            nadd = 1;
+                            *curptr = c;
+                        }
+                    break;
+                    case DISP_RAW:
+                        nadd = sprintf(curptr, "%-3.2X", c);
+                    break;
+                    default:
+                    break;
+                }
+                linebuffer->fbuf_curr += nadd;
+                linebuffer->lastlen += nadd;
+                curptr += nadd;
+            }
+        }else{ // HEXDUMP: refill full string buffer
+            char ascii[MAXCOLS]; // buffer for ASCII printing
+            char *ptr = ptrtobuf(linebuffer->lnarr_curr);
+            if(!ptr) ERRX("Can't get current line");
+            size_t address = linebuffer->linelen * linebuffer->lnarr_curr; // string starting address
+            const uint8_t *start = data - linebuffer->lastlen; // starting byte in hexdump string
+            linebuffer->lastlen += Nsymbols;
+            int nadd = sprintf(ptr, "%-10.8zX", address);
+            ptr += nadd;
+            size_t i = 0;
+            for(; i < linebuffer->lastlen; ++i){
+                if(0 == (i % 8)){
+                    sprintf(ptr, " "); ++ptr; ++nadd;
+                }
+                uint8_t c = start[i];
+                int x = sprintf(ptr, "%-3.2X", c);
+                if(c > 31 && c < 127) ascii[i] = c;
+                else ascii[i] = '.';
+                ptr += x;
+                nadd += x;
+            }
+            ascii[i] = 0;
+            int emptyvals = (int)(linebuffer->linelen - linebuffer->lastlen);
+            nadd += sprintf(ptr, "%*s|%*s|", 3*emptyvals+emptyvals/8, "", -((int)linebuffer->linelen), ascii);
+            linebuffer->fbuf_curr = linebuffer->line_array_idx[linebuffer->lnarr_curr] + nadd;
+            DBG("---- Total added symbols: %zd, fbuf_curr=%zd (%zd + %zd)", nadd, linebuffer->fbuf_curr,
+                linebuffer->line_array_idx[linebuffer->lnarr_curr], nadd);
+        }
+        DBG("last=%d, line=%d", linebuffer->lastlen, linebuffer->linelen);
+        if(linebuffer->lastlen == linebuffer->linelen) finalize_line();
+        len -= Nsymbols;
+        data += Nsymbols;
+    }
+}
+
+/**
+ * @brief AddData - add new data buffer to global buffer and last displayed string
+ * @param data - data
+ * @param len  - length of `data`
+ */
+void AddData(const uint8_t *data, int len){
+    // now print all symbols into buff
+    chksizes();
+    memcpy(raw_buffer + rawbufcur, data, len);
+    DBG("Got %d bytes, now buffer have %d", len, rawbufcur+len);
+    FormatData(raw_buffer + rawbufcur, len);
+    rawbufcur += len;
+    redisplay_addline(); // display last symbols if can
+}
+
 static void resize(){
+    DBG("RESIZE WINDOW");
     if(LINES > 2){
         wresize(msg_win, LINES - 2, COLS);
         wresize(sep_win, 1, COLS);
@@ -258,10 +484,19 @@ static void resize(){
         mvwin(sep_win, LINES - 2, 0);
         mvwin(cmd_win, LINES - 1, 0);
     }
+    pthread_mutex_lock(&dtty->mutex);
+    linebuf_new(); // free old and alloc new
+    FormatData(raw_buffer, rawbufcur); // reformat all data
+    pthread_mutex_unlock(&dtty->mutex);
     msg_win_redisplay(true);
     show_mode(true);
     doupdate();
 }
+/*
+void swinch(_U_ int sig){
+    //signal(SIGWINCH, swinch);
+    DBG("got resize");
+}*/
 
 void init_ncurses(){
     if (!initscr())
@@ -275,7 +510,6 @@ void init_ncurses(){
     noecho();
     nonl();
     intrflush(NULL, FALSE);
-    keypad(cmd_win, TRUE);
     curs_set(2);
     if(LINES > 2){
         msg_win = newwin(LINES - 2, COLS, 0, 0);
@@ -289,6 +523,8 @@ void init_ncurses(){
     }
     if(!msg_win || !sep_win || !cmd_win)
         fail_exit("Failed to allocate windows");
+    wtimeout(cmd_win, 4);
+    keypad(cmd_win, TRUE);
     if(has_colors()){
         init_pair(BKG_NO, COLOR_WHITE, COLOR_BLUE);
         init_pair(BKGMARKED_NO, 1, COLOR_BLUE); // COLOR_RED used in my usefull_macros
@@ -300,10 +536,16 @@ void init_ncurses(){
     }
     show_mode(false);
     mousemask(BUTTON4_PRESSED|BUTTON5_PRESSED, NULL);
+    DBG("INIT raw buffer");
+    rawbufsz = RBUFSIZ;
+    raw_buffer = MALLOC(uint8_t, rawbufsz);
+    linebuf_new();
+    //signal(SIGWINCH, swinch);
 }
 
 void deinit_ncurses(){
     visual_mode = false;
+    linebuf_free();
     delwin(msg_win);
     delwin(sep_win);
     delwin(cmd_win);
@@ -342,12 +584,14 @@ void init_readline(){
  * @param in, out - types for input and display
   */
 static void change_disp(disptype in, disptype out){
-    if(in >= DISP_TEXT && in < DISP_UNCHANGED){
+    if(in >= DISP_TEXT && in < DISP_UNCHANGED && in != input_type){
         input_type = in;
         DBG("input -> %s", dispnames[in]);
     }
-    if(out >= DISP_TEXT && out < DISP_UNCHANGED){
+    if(out >= DISP_TEXT && out < DISP_UNCHANGED && out != disp_type){
         disp_type = out;
+        DBG("output -> %s", dispnames[out]);
+        resize(); // reformat everything
     }
     show_mode(false);
 }
@@ -356,22 +600,34 @@ void deinit_readline(){
     rl_callback_handler_remove();
 }
 
-static void rolldown(){
-    if(firstline && firstline->prev){
-        firstline = firstline->prev;
-        msg_win_redisplay(false);
-        show_mode(false);
-        doupdate();
-    }
+/**
+ * @brief rolldown/rollup - roll text by `N` strings
+ * @param N - amount of strings
+ */
+static void rolldown(size_t N){ // if N==0 goto first line
+    DBG("rolldown for %zd, first was %zd", N, firstdisplineno);
+    size_t old = firstdisplineno;
+    if(firstdisplineno < N || N == 0) firstdisplineno = 0;
+    else firstdisplineno -= N;
+    DBG("old was %zd, become %zd", old, firstdisplineno);
+    if(old == firstdisplineno) return;
+    msg_win_redisplay(false);
+    //msg_win_redisplay(true); show_mode(true); doupdate();
 }
-
-static void rollup(){
-    if(firstline && firstline->next){
-        firstline = firstline->next;
-        msg_win_redisplay(false);
-        show_mode(false);
-        doupdate();
+static void rollup(size_t N){ // if N==0 goto last line
+    DBG("scroll up for %d", N);
+    size_t half = (LINES+1)/2;
+    if(firstdisplineno + half >= linebuffer->lnarr_curr){
+        DBG("Don't need: %zd+%zd >= %zd", firstdisplineno, half, linebuffer->lnarr_curr);
+        return; // don't scroll over a half of viewed area
     }
+    size_t old = firstdisplineno;
+    firstdisplineno += N;
+    if(firstdisplineno + half > linebuffer->lnarr_curr || N == 0) firstdisplineno = linebuffer->lnarr_curr - half;
+    DBG("old was %zd, become %zd", old, firstdisplineno);
+    if(old == firstdisplineno) return;
+    msg_win_redisplay(false);
+    //msg_win_redisplay(true); show_mode(true); doupdate();
 }
 
 static const char *help[] = {
@@ -412,13 +668,15 @@ void *cmdline(void* arg){
     show_mode(false);
     do{
         int c = wgetch(cmd_win);
+        if(c < 0) continue;
         bool processed = true;
-        //DBG("wgetch got %d", c);
+        DBG("wgetch got %d", c);
         disptype dt = DISP_UNCHANGED;
         switch(c){ // common keys for both modes
             case KEY_F(1): // help
                 DBG("\n\nASK for help\n\n");
                 popup_msg(msg_win, help);
+                resize(); // call `resize` to enshure that no problems would be later
             break;
             case KEY_F(2): // TEXT mode
                 DBG("\n\nIN TEXT mode\n\n");
@@ -434,8 +692,8 @@ void *cmdline(void* arg){
             break;
             case KEY_MOUSE:
                 if(getmouse(&event) == OK){
-                    if(event.bstate & (BUTTON4_PRESSED)) rolldown(); // wheel up
-                    else if(event.bstate & (BUTTON5_PRESSED)) rollup(); // wheel down
+                    if(event.bstate & (BUTTON4_PRESSED)) rolldown(1); // wheel up
+                    else if(event.bstate & (BUTTON5_PRESSED)) rollup(1); // wheel down
                 }
             break;
             case '\t': // tab switch between scroll and edit mode
@@ -501,25 +759,23 @@ void *cmdline(void* arg){
             }
         }else{
             switch(c){ // TODO: add home/end
+                case KEY_HOME:
+                    rolldown(0);
+                break;
+                case KEY_END:
+                    rollup(0);
+                break;
                 case KEY_UP: // roll down for one item
-                    rolldown();
+                    rolldown(1);
                 break;
                 case KEY_DOWN: // roll up for one item
-                    rollup();
+                    rollup(1);
                 break;
-                case KEY_PPAGE: // PageUp: roll down for 10 items
-                    for(int i = 0; i < 10; ++i){
-                        if(firstline && firstline->prev) firstline = firstline->prev;
-                        else break;
-                    }
-                    msg_win_redisplay(false);
+                case KEY_PPAGE: // PageUp: roll down for 2/3 of screen
+                    rolldown((2*LINES)/3);
                 break;
-                case KEY_NPAGE: // PageUp: roll up for 10 items
-                    for(int i = 0; i < 10; ++i){
-                        if(firstline && firstline->next) firstline = firstline->next;
-                        else break;
-                    }
-                    msg_win_redisplay(false);
+                case KEY_NPAGE: // PageUp: roll up for 2/3 of screen
+                    rollup((2*LINES)/3);
                 break;
                 default:
                     if(c == 'q' || c == 'Q') should_exit = true; // quit
