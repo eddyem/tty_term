@@ -300,9 +300,9 @@ static char *parse_format(const char *iformat, tcflag_t *flags){
             f |= PARENB;
         break;
         case 'N': // none
-            f |= PARENB | PARODD;
         break;
         case 'O': // odd
+            f |= PARENB | PARODD;
         break;
         default:
             goto someerr;
