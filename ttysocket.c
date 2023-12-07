@@ -335,8 +335,8 @@ static TTY_descr2* opentty(){
     tcflag_t flags;
     descr->format = parse_format(device->port, &flags);
     if(!descr->format) goto someerr;
-    descr->buf = MALLOC(uint8_t, BUFSIZ);
-    descr->bufsz = BUFSIZ-1;
+    descr->buf = MALLOC(uint8_t, 512);
+    descr->bufsz = 511;
     if((descr->comfd = open(descr->portname, O_RDWR|O_NOCTTY)) < 0){
         WARN(_("Can't use port %s"), descr->portname);
         goto someerr;
