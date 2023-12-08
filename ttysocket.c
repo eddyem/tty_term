@@ -357,6 +357,10 @@ static TTY_descr2* opentty(){
         goto someerr;
     }
     ioctl(descr->comfd, TCGETS2, &descr->tty);
+    if(descr->tty.c_ispeed != device->speed || descr->tty.c_ospeed != device->speed){
+        WARN(_("Can't set speed %d, got ispeed=%d, ospeed=%d"), device->speed, descr->tty.c_ispeed, descr->tty.c_ospeed);
+        //goto someerr;
+    }
     device->speed = descr->tty.c_ispeed;
     return descr;
 someerr:
@@ -409,6 +413,7 @@ int opendev(chardevice *d, char *path){
         }
     }
     changeeol(device->eol); // allow string functions to know EOL
+    memcpy(d, device, sizeof(chardevice));
     return TRUE;
 }
 
