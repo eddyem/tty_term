@@ -357,7 +357,7 @@ static TTY_descr2* opentty(){
         goto someerr;
     }
     ioctl(descr->comfd, TCGETS2, &descr->tty);
-    if(descr->tty.c_ispeed != device->speed || descr->tty.c_ospeed != device->speed){
+    if(descr->tty.c_ispeed != (speed_t)device->speed || descr->tty.c_ospeed != (speed_t)device->speed){
         WARN(_("Can't set speed %d, got ispeed=%d, ospeed=%d"), device->speed, descr->tty.c_ispeed, descr->tty.c_ospeed);
         //goto someerr;
     }
@@ -381,7 +381,8 @@ int opendev(chardevice *d, char *path){
     device = MALLOC(chardevice, 1);
     memcpy(device, d, sizeof(chardevice));
     device->name = strdup(d->name);
-    device->port = strdup(d->port);
+    if(d->port) device->port = strdup(d->port);
+    DBG("devtype=%d", device->type);
     switch(device->type){
         case DEV_TTY:
             DBG("Serial");
@@ -394,6 +395,7 @@ int opendev(chardevice *d, char *path){
         break;
         case DEV_NETSOCKET:
         case DEV_UNIXSOCKET:
+            DBG("Socket");
             device->dev = opensocket();
             if(!device->dev){
                 WARNX("Can't open socket");

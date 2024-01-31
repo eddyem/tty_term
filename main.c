@@ -59,12 +59,18 @@ int main(int argc, char **argv){
         signals(0);
     }
     conndev.name = strdup(G->ttyname);
-    conndev.port = strdup(G->port);
+    DBG("device name: %s", conndev.name);
     if(G->socket){
         if(!G->port) conndev.type = DEV_UNIXSOCKET;
-        else conndev.type = DEV_NETSOCKET;
+        else{
+            conndev.port = strdup(G->port);
+            conndev.type = DEV_NETSOCKET;
+        }
+        DBG("socket port=%s, type=%d", conndev.port, conndev.type);
     }else{
         conndev.speed = G->speed;
+        conndev.port = strdup(G->serformat); // `port` of tty is serial format
+        DBG("speed=%d, format=%s", conndev.speed, conndev.port);
     }
     if(!opendev(&conndev, G->dumpfile)){
         signals(0);

@@ -31,6 +31,7 @@ typedef struct{
     char *ttyname;      // device name
     char *eol;          // end of line: \r (CR), \rn (CR+LF) or \n (LF): "r", "rn", "n"
     char *port;         // socket port
+    char *serformat;    // format of serial line
 } glob_pars;
 
 

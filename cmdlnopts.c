@@ -36,7 +36,7 @@ glob_pars const Gdefault = {
     .speed = 9600,
     .eol = "n",
     .tmoutms = 100,
-    .port = "8N1"
+    .serformat = "8N1"
 };
 
 /*
@@ -53,7 +53,7 @@ static myoption cmdlnopts[] = {
     {"port",    NEED_ARG,   NULL,   'p',    arg_string, APTR(&G.port),      _("socket port (none for UNIX)")},
     {"socket",  NO_ARGS,    NULL,   'S',    arg_int,    APTR(&G.socket),    _("open socket")},
     {"dumpfile",NEED_ARG,   NULL,   'd',    arg_string, APTR(&G.dumpfile),  _("dump data to this file")},
-    {"format",  NEED_ARG,   NULL,   'f',    arg_string, APTR(&G.port),      _("tty format (default: 8N1)")},
+    {"format",  NEED_ARG,   NULL,   'f',    arg_string, APTR(&G.serformat), _("tty format (default: 8N1)")},
     end_option
 };
 

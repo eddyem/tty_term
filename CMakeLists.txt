@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.0)
 set(PROJ tty_term)
-set(MINOR_VERSION "2")
+set(MINOR_VERSION "3")
 set(MID_VERSION "1")
 set(MAJOR_VERSION "0")
 set(VERSION "${MAJOR_VERSION}.${MID_VERSION}.${MINOR_VERSION}")
@@ -8,6 +8,9 @@ set(VERSION "${MAJOR_VERSION}.${MID_VERSION}.${MINOR_VERSION}")
 project(${PROJ} VERSION ${VERSION} LANGUAGES C)
 
 message("VER: ${VERSION}")
+
+# options 
+option(DEBUG "Compile in debug mode" OFF)
 
 # default flags
 set(CMAKE_C_FLAGS_RELEASE "")
@@ -20,13 +23,14 @@ set(CMAKE_COLOR_MAKEFILE ON)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} SOURCES)
 
 # cmake -DEBUG=1 -> debugging
-if(DEFINED EBUG)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wextra -Wall -Werror -W")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Wall -Werror -W")
+if(DEBUG)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wextra -Wall -Werror -W -Og -g3 -ggdb -fno-builtin-strlen")
     set(CMAKE_BUILD_TYPE DEBUG)
     set(CMAKE_VERBOSE_MAKEFILE "ON")
     add_definitions(-DEBUG)
 else()
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -march=native -fdata-sections -ffunction-sections -flto=auto")
+    SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--gc-sections -flto=auto")
     set(CMAKE_BUILD_TYPE RELEASE)
 endif()
 
