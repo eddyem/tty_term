@@ -738,7 +738,7 @@ void *cmdline(void* arg){
         if(insert_mode){
             DBG("forward_to_readline(%d)", c);
             char *ptr = NULL;
-            switch(c){ // check special keys
+            switch(c){ // check special keys (showkey -a)
                 case KEY_UP:
                     ptr = "A";
                 break;
@@ -752,9 +752,9 @@ void *cmdline(void* arg){
                     ptr = "D";
                 break;
                 case KEY_BACKSPACE:
-                    ptr = "H";
-                break;
-                case KEY_IC:
+                    forward_to_readline(127); // ^?
+                break;  
+                case KEY_IC: // ^[[2~
                     DBG("key insert");
                     ptr = "2~";
                 break;
@@ -777,8 +777,8 @@ void *cmdline(void* arg){
                     forward_to_readline(c);
             }
             if(ptr){ // arrows and so on: 27, 91, code
-                forward_to_readline(27);
-                forward_to_readline(91);
+                forward_to_readline(27); // ^
+                forward_to_readline(91); // [[
                 while(*ptr) forward_to_readline(*ptr++);
             }
         }else{
