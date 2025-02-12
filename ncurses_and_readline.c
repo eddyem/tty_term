@@ -72,17 +72,16 @@ static WINDOW *msg_win; // Message window
 static WINDOW *sep_win; // Separator line above the command (readline) window
 static WINDOW *cmd_win; // Command (readline) window
 
+// maximal columns in line
+#define MAXCOLS     (512)
 // amount of lines in line_arary
-//#define LINEARRSZ   (BUFSIZ/100)
-#define LINEARRSZ   3
+#define LINEARRSZ   (32)
 // formatted buffer initial size
-#define FBUFSIZ     30
+#define FBUFSIZ     (MAXCOLS * LINEARRSZ * 4)
 // raw buffer initial size
-#define RBUFSIZ     30
+#define RBUFSIZ     (FBUFSIZ / 2)
 // amount of spaces and delimeters in hexview string (address + 2 lines + 3 additional spaces)
 #define HEXDSPACES   (13)
-// maximal columns in line
-#define MAXCOLS      (512)
 
 typedef struct{
     char *formatted_buffer; // formatted buffer, ptrtobuf(i) returns i'th string
@@ -302,21 +301,24 @@ static void linebuf_free(){
  * @brief chksizes - check sizes of buffers and enlarge them if need
  */
 static void chksizes(){
-    size_t addportion = MAXCOLS*3;
+    size_t addportion = MAXCOLS * LINEARRSZ;
     if(rawbufsz - rawbufcur < addportion){ // raw buffer always should be big enough
         rawbufsz += (addportion > RBUFSIZ) ? addportion : RBUFSIZ;
         DBG("Enlarge raw buffer to %zd", rawbufsz);
         raw_buffer = realloc(raw_buffer, rawbufsz);
+        DBG("done");
     }
     if(linebuffer->fbuf_size - linebuffer->fbuf_curr < addportion){ // realloc buffer if need
         linebuffer->fbuf_size += (addportion > FBUFSIZ) ? addportion : FBUFSIZ;
         DBG("Enlarge formatted buffer to %zd", linebuffer->fbuf_size);
         linebuffer->formatted_buffer = realloc(linebuffer->formatted_buffer, linebuffer->fbuf_size);
+        DBG("done");
     }
-    if(linebuffer->lnarr_size - linebuffer->lnarr_curr < 3){
+    if(linebuffer->lnarr_size - linebuffer->lnarr_curr < LINEARRSZ){
         linebuffer->lnarr_size += LINEARRSZ;
         DBG("Enlarge line array buffer to %zd", linebuffer->lnarr_size);
         linebuffer->line_array_idx = realloc(linebuffer->line_array_idx, linebuffer->lnarr_size * sizeof(size_t));
+        DBG("done");
     }
 }
 
