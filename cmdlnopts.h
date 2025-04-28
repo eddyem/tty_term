@@ -27,6 +27,7 @@ typedef struct{
     int speed;          // baudrate
     int tmoutms;        // timeout for select() in ms
     int socket;         // open socket
+    int exclusive;      // open serial in exclusive mode
     char *dumpfile;     // file to save dump
     char *ttyname;      // device name
     char *eol;          // end of line: \r (CR), \rn (CR+LF) or \n (LF): "r", "rn", "n"

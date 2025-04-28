@@ -81,11 +81,11 @@ static int waittoread(int fd){
 // get data drom TTY
 static uint8_t *getttydata(int *len){
     if(!device || !device->dev) return NULL;
-    TTY_descr2 *D = device->dev;
+    sl_tty_t *D = device->dev;
     if(D->comfd < 0) return NULL;
     int L = 0;
     int length = D->bufsz - 1; // -1 for terminating zero
-    uint8_t *ptr = D->buf;
+    uint8_t *ptr = (uint8_t*)D->buf;
     int s = 0;
     do{
         if(!(s = waittoread(D->comfd))) break;
@@ -106,19 +106,19 @@ static uint8_t *getttydata(int *len){
     if(len) *len = L;
     if(!L) return NULL;
     DBG("buffer len: %zd, content: =%s=", D->buflen, D->buf);
-    return D->buf;
+    return (uint8_t*)D->buf;
 }
 
 static uint8_t *getsockdata(int *len){
     if(!device || !device->dev) return NULL;
-    TTY_descr2 *D = device->dev;
+    sl_tty_t *D = device->dev;
     if(D->comfd < 0) return NULL;
     uint8_t *ptr = NULL;
     int n = waittoread(D->comfd);
     if(n == 1){
         n = read(D->comfd, D->buf, D->bufsz-1);
         if(n > 0){
-            ptr = D->buf;
+            ptr = (uint8_t*)D->buf;
             ptr[n] = 0;
             D->buflen = n;
             DBG("got %d: ..%s..", n, ptr);
@@ -173,7 +173,7 @@ int SendData(const uint8_t *data, size_t len){
     if(0 == pthread_mutex_lock(&device->mutex)){
         switch(device->type){
             case DEV_TTY:
-                if(write_tty(device->dev->comfd, (const char*)data, len)) ret = 0;
+                if(sl_tty_write(device->dev->comfd, (const char*)data, len)) ret = 0;
                 else ret = len;
             break;
             case DEV_NETSOCKET:
@@ -197,10 +197,10 @@ int SendData(const uint8_t *data, size_t len){
 
 static const int socktypes[] = {SOCK_STREAM, SOCK_RAW, SOCK_RDM, SOCK_SEQPACKET, SOCK_DCCP, SOCK_PACKET, SOCK_DGRAM, 0};
 
-static TTY_descr2* opensocket(){
+static sl_tty_t* opensocket(){
     if(!device) return FALSE;
-    TTY_descr2 *descr = MALLOC(TTY_descr2, 1); // only for `buf` and bufsz/buflen
-    descr->buf = MALLOC(uint8_t, BUFSIZ);
+    sl_tty_t *descr = MALLOC(sl_tty_t, 1); // only for `buf` and bufsz/buflen
+    descr->buf = MALLOC(char, BUFSIZ);
     descr->bufsz = BUFSIZ;
     // now try to open a socket
     descr->comfd = -1;
@@ -266,108 +266,20 @@ static TTY_descr2* opensocket(){
     return descr;
 }
 
-static char *parse_format(const char *iformat, tcflag_t *flags){
-    tcflag_t f = 0;
-    if(!iformat){ // default
-        *flags = CS8;
-        return strdup("8N1");
-    }
-    if(strlen(iformat) != 3) goto someerr;
-    switch(iformat[0]){
-        case '5':
-            f |= CS5;
-        break;
-        case '6':
-            f |= CS6;
-        break;
-        case '7':
-            f |= CS7;
-        break;
-        case '8':
-            f |= CS8;
-        break;
-        default:
-            goto someerr;
-    }
-    switch(iformat[1]){
-        case '0': // always 0
-            f |= PARENB | CMSPAR;
-        break;
-        case '1': // always 1
-            f |= PARENB | CMSPAR | PARODD;
-        break;
-        case 'E': // even
-            f |= PARENB;
-        break;
-        case 'N': // none
-        break;
-        case 'O': // odd
-            f |= PARENB | PARODD;
-        break;
-        default:
-            goto someerr;
-    }
-    switch(iformat[2]){
-        case '1':
-        break;
-        case '2':
-            f |= CSTOPB;
-        break;
-        default:
-            goto someerr;
-    }
-    *flags = f;
-    return strdup(iformat);
-someerr:
-    WARNX(_("Wrong USART format \"%s\"; use NPS, where N: 5..8; P: N/E/O/1/0, S: 1/2"), iformat);
-    return NULL;
-}
-
-static TTY_descr2* opentty(){
+static sl_tty_t* opentty(){
     if(!device->name){
         /// Отсутствует имя порта
         WARNX(_("Port name is missing"));
         return NULL;
     }
-    TTY_descr2 *descr = MALLOC(TTY_descr2, 1);
-    descr->portname = strdup(device->name);
-    descr->speed = device->speed;
-    tcflag_t flags;
-    descr->format = parse_format(device->port, &flags);
-    if(!descr->format) goto someerr;
-    descr->buf = MALLOC(uint8_t, 512);
-    descr->bufsz = 511;
-    if((descr->comfd = open(descr->portname, O_RDWR|O_NOCTTY)) < 0){
-        WARN(_("Can't use port %s"), descr->portname);
-        goto someerr;
+    sl_tty_t *descr = sl_tty_new(device->name, device->speed, 4096);
+    if(!descr){
+        WARN("Can't init %s", device->name);
+        return NULL;
     }
-    if(ioctl(descr->comfd, TCGETS2, &descr->oldtty)){
-        WARN(_("Can't get port config"));
-        goto someerr;
-    }
-    descr->tty = descr->oldtty;
-    descr->tty.c_lflag = 0; // ~(ICANON | ECHO | ECHOE | ISIG)
-    descr->tty.c_iflag = 0; // don't do any changes in input stream
-    descr->tty.c_oflag = 0; // don't do any changes in output stream
-    descr->tty.c_cflag = BOTHER | flags |CREAD|CLOCAL;
-    descr->tty.c_ispeed = device->speed;
-    descr->tty.c_ospeed = device->speed;
-    if(ioctl(descr->comfd, TCSETS2, &descr->tty)){
-        WARN(_("Can't set new port config"));
-        goto someerr;
-    }
-    ioctl(descr->comfd, TCGETS2, &descr->tty);
-    if(descr->tty.c_ispeed != (speed_t)device->speed || descr->tty.c_ospeed != (speed_t)device->speed){
-        WARN(_("Can't set speed %d, got ispeed=%d, ospeed=%d"), device->speed, descr->tty.c_ispeed, descr->tty.c_ospeed);
-        //goto someerr;
-    }
-    device->speed = descr->tty.c_ispeed;
+    descr->format = device->port;
+    descr = sl_tty_open(descr, device->exclusive);
     return descr;
-someerr:
-    FREE(descr->format);
-    FREE(descr->buf);
-    FREE(descr);
-    return NULL;
 }
 
 /**
@@ -430,7 +342,7 @@ void closedev(){
     switch(device->type){
         case DEV_TTY:
             if(device->dev){
-                TTY_descr2 *t = device->dev;
+                sl_tty_t *t = device->dev;
                 ioctl(t->comfd, TCSETS2, &t->oldtty); // return TTY to previous state
                 close(t->comfd);
             }

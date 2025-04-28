@@ -18,6 +18,7 @@
 
 #pragma once
 #include <curses.h>
+#include <sys/ttydefaults.h>
 
 #define QUIT        CTRL('Q')
 #define ESCAPE      CTRL('[')

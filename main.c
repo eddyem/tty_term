@@ -38,7 +38,7 @@ void signals(int signo){
 
 int main(int argc, char **argv){
     glob_pars *G = NULL; // default parameters see in cmdlnopts.c
-    initial_setup();
+    sl_init();
 #ifdef EBUG
     OPENLOG("debug.log", LOGLEVEL_ANY, 1);
 #endif
@@ -71,6 +71,7 @@ int main(int argc, char **argv){
         conndev.speed = G->speed;
         conndev.port = strdup(G->serformat); // `port` of tty is serial format
         DBG("speed=%d, format=%s", conndev.speed, conndev.port);
+        conndev.exclusive = G->exclusive;
     }
     if(!opendev(&conndev, G->dumpfile)){
         signals(0);

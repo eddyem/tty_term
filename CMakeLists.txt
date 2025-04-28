@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0)
 set(PROJ tty_term)
-set(MINOR_VERSION "3")
-set(MID_VERSION "1")
+set(MINOR_VERSION "1")
+set(MID_VERSION "2")
 set(MAJOR_VERSION "0")
 set(VERSION "${MAJOR_VERSION}.${MID_VERSION}.${MINOR_VERSION}")
 
@@ -36,7 +36,7 @@ endif()
 
 ###### pkgconfig ######
 # pkg-config modules (for pkg-check-modules)
-set(MODULES ncurses readline usefull_macros)
+set(MODULES ncurses readline usefull_macros>=0.3.2)
 
 # find packages:
 find_package(PkgConfig REQUIRED)
@@ -67,9 +67,10 @@ message("Install dir prefix: ${CMAKE_INSTALL_PREFIX}")
 # exe file
 add_executable(${PROJ} ${SOURCES})
 # -I
-include_directories(${${PROJ}_INCLUDE_DIRS})
+target_include_directories(${PROJ} PUBLIC ${${PROJ}_INCLUDE_DIRS})
 # -L
-link_directories(${${PROJ}_LIBRARY_DIRS})
+target_link_directories(${PROJ} PUBLIC ${${PROJ}_LIBRARY_DIRS})
+
 # -D
 add_definitions(${CFLAGS} -DLOCALEDIR=\"${LOCALEDIR}\" -DPROJECT=\"${PROJ}\"
         -DPACKAGE_VERSION=\"${VERSION}\" -DGETTEXT_PACKAGE=\"${PROJ}\"

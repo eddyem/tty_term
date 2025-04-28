@@ -43,7 +43,7 @@ glob_pars const Gdefault = {
  * Define command line options by filling structure:
  *  name    has_arg flag    val     type        argptr          help
 */
-static myoption cmdlnopts[] = {
+static sl_option_t cmdlnopts[] = {
     // set 1 to param despite of its repeating number:
     {"help",    NO_ARGS,    NULL,   'h',    arg_int,    APTR(&help),        _("show this help")},
     {"speed",   NEED_ARG,   NULL,   's',    arg_int,    APTR(&G.speed),     _("baudrate (default: 9600)")},
@@ -54,6 +54,7 @@ static myoption cmdlnopts[] = {
     {"socket",  NO_ARGS,    NULL,   'S',    arg_int,    APTR(&G.socket),    _("open socket")},
     {"dumpfile",NEED_ARG,   NULL,   'd',    arg_string, APTR(&G.dumpfile),  _("dump data to this file")},
     {"format",  NEED_ARG,   NULL,   'f',    arg_string, APTR(&G.serformat), _("tty format (default: 8N1)")},
+    {"exclusive",NO_ARGS,   NULL,   'x',    arg_int,    APTR(&G.exclusive), _("open serial in exclusive mode")},
     end_option
 };
 
@@ -67,10 +68,10 @@ static myoption cmdlnopts[] = {
 glob_pars *parse_args(int argc, char **argv){
     void *ptr = memcpy(&G, &Gdefault, sizeof(G)); assert(ptr);
     // format of help: "Usage: progname [args]\n"
-    change_helpstring(_(PROJECT " version " PACKAGE_VERSION "\nUsage: %s [args]\n\n\tWhere args are:\n"));
+    sl_helpstring(_(PROJECT " version " PACKAGE_VERSION "\nUsage: %s [args]\n\n\tWhere args are:\n"));
     // parse arguments
-    parseargs(&argc, &argv, cmdlnopts);
-    if(help) showhelp(-1, cmdlnopts);
+    sl_parseargs(&argc, &argv, cmdlnopts);
+    if(help) sl_showhelp(-1, cmdlnopts);
     if(argc > 0){
         WARNX("Wrong arguments:\n");
         for(int i = 0; i < argc; i++)
