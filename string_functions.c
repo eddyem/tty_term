@@ -140,7 +140,7 @@ static inline const char *gethex(const char *line, int *ch){
 static inline const char *getspec(const char *line, int *ch){
     if(!*line){ *ch = -1; return line; }
     int got = -1, s = *line++; // next symbol after '\'
-    if(s >= '0' && s <= '7'){ // octal symbol
+    if(s >= '0' && s <= '7'){ // octal symbol like \127
         line = getoct(line-1, &got);
     }else switch(s){
         case 'a': got = '\a'; break;
@@ -186,6 +186,7 @@ int convert_and_send(disptype input_type, const char *line){
         if(curpos + sz >= bufsiz){ // out ouptut buffer can't be larger than input
             bufsiz += BUFSIZ;
             buf = realloc(buf, bufsiz);
+            if(!buf) ERR("realloc()");
         }
     }
     while(*line){

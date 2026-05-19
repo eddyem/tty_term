@@ -28,11 +28,10 @@
  * here are global parameters initialisation
  */
 static int help;
-static glob_pars  G;
 
 //            DEFAULTS
 // default global parameters
-glob_pars const Gdefault = {
+static glob_pars G = {
     .speed = 9600,
     .eol = "n",
     .tmoutms = 100,
@@ -47,13 +46,13 @@ static sl_option_t cmdlnopts[] = {
     // set 1 to param despite of its repeating number:
     {"help",    NO_ARGS,    NULL,   'h',    arg_int,    APTR(&help),        _("show this help")},
     {"speed",   NEED_ARG,   NULL,   's',    arg_int,    APTR(&G.speed),     _("baudrate (default: 9600)")},
-    {"name",    NEED_ARG,   NULL,   'n',    arg_string, APTR(&G.ttyname),   _("serial device path or server name/IP or socket path")},
+    {"name",    NEED_ARG,   NULL,   'n',    arg_string, APTR(&G.node),      _("path to serial device, server name:IP or socket path")},
     {"eol",     NEED_ARG,   NULL,   'e',    arg_string, APTR(&G.eol),       _("end of line: n (default), r, nr or rn")},
     {"timeout", NEED_ARG,   NULL,   't',    arg_int,    APTR(&G.tmoutms),   _("timeout for select() in ms (default: 100)")},
-    {"port",    NEED_ARG,   NULL,   'p',    arg_string, APTR(&G.port),      _("socket port (none for UNIX)")},
-    {"socket",  NO_ARGS,    NULL,   'S',    arg_int,    APTR(&G.socket),    _("open socket")},
+    {"socket",  NO_ARGS,    NULL,   'S',    arg_int,    APTR(&G.socket),    _("open INET socket")},
     {"dumpfile",NEED_ARG,   NULL,   'd',    arg_string, APTR(&G.dumpfile),  _("dump data to this file")},
     {"format",  NEED_ARG,   NULL,   'f',    arg_string, APTR(&G.serformat), _("tty format (default: 8N1)")},
+    {"unix",    NO_ARGS,    NULL,   'U',    arg_int,    APTR(&G.unixsock),  _("open UNIX-socket")},
     {"exclusive",NO_ARGS,   NULL,   'x',    arg_int,    APTR(&G.exclusive), _("open serial in exclusive mode")},
     end_option
 };
@@ -66,7 +65,6 @@ static sl_option_t cmdlnopts[] = {
  * @return allocated structure with global parameters
  */
 glob_pars *parse_args(int argc, char **argv){
-    void *ptr = memcpy(&G, &Gdefault, sizeof(G)); assert(ptr);
     // format of help: "Usage: progname [args]\n"
     sl_helpstring(_(PROJECT " version " PACKAGE_VERSION "\nUsage: %s [args]\n\n\tWhere args are:\n"));
     // parse arguments

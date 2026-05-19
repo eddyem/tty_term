@@ -17,27 +17,22 @@
  */
 
 #pragma once
-#ifndef CMDLNOPTS_H__
-#define CMDLNOPTS_H__
 
 /*
  * here are some typedef's for global data
  */
 typedef struct{
     int speed;          // baudrate
-    int tmoutms;        // timeout for select() in ms
     int socket;         // open socket
+    int unixsock;       // UNIX-socket instead of INET
     int exclusive;      // open serial in exclusive mode
+    double tmoutms;     // timeout for select() in ms
     char *dumpfile;     // file to save dump
-    char *ttyname;      // device name
+    char *node;         // node name / device path
     char *eol;          // end of line: \r (CR), \rn (CR+LF) or \n (LF): "r", "rn", "n"
-    char *port;         // socket port
     char *serformat;    // format of serial line
 } glob_pars;
 
 
-// default & global parameters
-extern glob_pars const Gdefault;
-
 glob_pars *parse_args(int argc, char **argv);
-#endif // CMDLNOPTS_H__
+

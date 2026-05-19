@@ -19,62 +19,85 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h> // strcmp
+#include <strings.h>
+#include <unistd.h>
+
 #include "cmdlnopts.h"
 #include "ncurses_and_readline.h"
 #include "ttysocket.h"
 
 #include "dbg.h"
 
-static chardevice conndev = {.dev = NULL, .mutex = PTHREAD_MUTEX_INITIALIZER, .name = NULL, .type = DEV_TTY};
+static int should_exit = 0;
 
 void signals(int signo){
-    signal(signo, SIG_IGN);
-    closedev();
-    deinit_ncurses();
-    deinit_readline();
-    DBG("Exit by signal %d", signo);
-    exit(signo);
+    DBG("signo = %d", signo);
+    should_exit = 1;
+    if(signo > 0){
+        DBG("Exit by signal %d", signo);
+    }else if(signo < 0){
+        should_exit = -1;
+        DBG("exit by disconnection");
+    }
 }
 
 int main(int argc, char **argv){
+    chardevice *conndev = MALLOC(chardevice, 1); // should be allocated to FREE later
+    pthread_mutex_init(&conndev->mutex, NULL);
+    conndev->type = DEV_TTY;
     glob_pars *G = NULL; // default parameters see in cmdlnopts.c
     sl_init();
 #ifdef EBUG
     OPENLOG("debug.log", LOGLEVEL_ANY, 1);
 #endif
+    DBG("Parsing");
     G = parse_args(argc, argv);
-    if(G->tmoutms < 0) ERRX("Timeout should be >= 0");
+    if(G->tmoutms < 0.){
+        ERRX("Timeout should be >= 0");
+        return 1;
+    }
+    if(sl_tty_tmout(G->tmoutms) < 0){
+        ERRX("Can't set timeout to %g ms", G->tmoutms);
+        return 1;
+    }
+    if(!G->node){
+        ERRX("You should point node name");
+        return 1;
+    }
     const char *EOL = "\n", *seol = "\\n";
     if(strcasecmp(G->eol, "n")){
         if(strcasecmp(G->eol, "r") == 0){ EOL = "\r"; seol = "\\r"; }
         else if(strcasecmp(G->eol, "rn") == 0){ EOL = "\r\n"; seol = "\\r\\n"; }
         else if(strcasecmp(G->eol, "nr") == 0){ EOL = "\n\r"; seol = "\\n\\r"; }
-        else ERRX("End of line should be \"r\", \"n\" or \"rn\" or \"nr\"");
-    }
-    strcpy(conndev.eol, EOL);
-    strcpy(conndev.seol, seol);
-    DBG("eol: %s, seol: %s", conndev.eol, conndev.seol);
-    if(!G->ttyname){
-        WARNX("You should point name");
-        signals(0);
-    }
-    conndev.name = strdup(G->ttyname);
-    DBG("device name: %s", conndev.name);
-    if(G->socket){
-        if(!G->port) conndev.type = DEV_UNIXSOCKET;
         else{
-            conndev.port = strdup(G->port);
-            conndev.type = DEV_NETSOCKET;
+            ERRX("End of line should be \"r\", \"n\", \"rn\" or \"nr\"");
+            return 1;
         }
-        DBG("socket port=%s, type=%d", conndev.port, conndev.type);
-    }else{
-        conndev.speed = G->speed;
-        conndev.port = strdup(G->serformat); // `port` of tty is serial format
-        DBG("speed=%d, format=%s", conndev.speed, conndev.port);
-        conndev.exclusive = G->exclusive;
     }
-    if(!opendev(&conndev, G->dumpfile)){
-        signals(0);
+    strcpy(conndev->eol, EOL);
+    strcpy(conndev->seol, seol);
+    DBG("eol: %s, seol: %s", conndev->eol, conndev->seol);
+    conndev->node = strdup(G->node);
+    if(!conndev->node){
+        ERR("strdup()");
+        return 1;
+    }
+    DBG("node: %s", conndev->node);
+    if(G->socket || G->unixsock){ // INET/UNIX socket
+        if(G->unixsock) conndev->type = DEV_UNIXSOCKET;
+        else conndev->type = DEV_NETSOCKET;
+    }else{ // serial device
+        conndev->speed = G->speed;
+        conndev->serformat = strdup(G->serformat); // `port` of tty is serial format
+        if(!conndev->serformat){
+            ERR("strdup()");
+            return 1;
+        }
+        DBG("speed=%d, format=%s", conndev->speed, conndev->serformat);
+        conndev->exclusive = G->exclusive;
+    }
+    if(!opendev(conndev, G->dumpfile)){
+        exit(1);
     }
     init_ncurses();
     init_readline();
@@ -84,23 +107,26 @@ int main(int argc, char **argv){
     signal(SIGQUIT, signals); // ctrl+\ - quit
     signal(SIGTSTP, SIG_IGN); // ignore ctrl+Z
     pthread_t writer;
-    if(pthread_create(&writer, NULL, cmdline, (void*)&conndev)) ERR("pthread_create()");
-    settimeout(G->tmoutms);
-    while(1){
-        if(0 == pthread_mutex_lock(&conndev.mutex)){
-            int l;
-            uint8_t *buf = ReadData(&l);
-            if(buf && l > 0){
-                AddData(buf, l);
-            }else if(l < 0){
-                pthread_mutex_unlock(&conndev.mutex);
-                ERRX("Device disconnected");
-            }
-            pthread_mutex_unlock(&conndev.mutex);
+    if(pthread_create(&writer, NULL, cmdline, (void*)conndev)) ERR("pthread_create()");
+    uint8_t buf[BUFSIZ];
+    while(conndev && conndev->fd > -1 && !should_exit){
+        ssize_t got = ReadData(buf, BUFSIZ);
+        if(got > 0){
+            AddData(buf, got);
+        }else if(got < 0){
+            WARNX("Device disconnected -> exit");
+            signals(-1);
         }
         usleep(1000);
     }
-    // never reached
+    DBG("Exit writer");
+    exit_writer();
+    usleep(1000);
+    deinit_ncurses();
+    deinit_readline();
+    closedev();
+    if(should_exit < 0) red("\nExit with error (disconnected?)\n\n");
+    else DBG("main(): Normal exit");
     return 0;
 }
 

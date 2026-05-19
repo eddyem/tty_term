@@ -25,11 +25,10 @@
 #include <curses.h>
 #include <readline/history.h>
 #include <readline/readline.h>
-#include <stdbool.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 //#include <signal.h>
 
 #include "dbg.h"
@@ -47,18 +46,19 @@ enum { // using colors
 };
 #define COLOR(x)  COLOR_PAIR(x ## _NO)
 
-
 // Keeps track of the terminal mode so we can reset the terminal if needed on errors
-static bool visual_mode = false;
+static atomic_bool visual_mode = false;
 // insert commands when true; roll upper screen when false
-static bool insert_mode = true;
-static bool should_exit = false;
+static atomic_bool insert_mode = true;
+static atomic_bool should_exit = false;
 
 static disptype disp_type = DISP_TEXT;  // type of displaying data
 static disptype input_type = DISP_TEXT; // parsing type of input data
 const char *dispnames[DISP_SIZE] = {"TEXT", "RAW", "HEX", "RTU (RAW)", "RTU (HEX)", "Error"};
 
 static chardevice *dtty = NULL;
+// ring buffer for new data
+static sl_ringbuffer_t *incoming_data = NULL;
 
 static void fail_exit(const char *msg){
     // Make sure endwin() is only called in visual mode. As a note, calling it
@@ -104,6 +104,10 @@ static unsigned char input; // Input character for readline
 // Used to signal "no more input" after feeding a character to readline
 static bool input_avail = false;
 
+void exit_writer(){
+    should_exit = true;
+}
+
 // Not bothering with 'input_avail' and just returning 0 here seems to do the
 // right thing too, but this might be safer across readline versions
 static int readline_input_avail(){
@@ -134,7 +138,7 @@ static void show_err(const char *text){
 }
 
 /**
- * @brief ptrtobuf - get n'th string of `formatted_buffer`
+ * @brief ptrtobuf - get n'th string of `formatted_buffer`; called when mutex locked
  * @param lineno - line number
  * @return pointer to n'th string in formatted buffer
  */
@@ -149,35 +153,10 @@ static char *ptrtobuf(size_t lineno){
     return (linebuffer->formatted_buffer + idx);
 }
 
-#if 0
-// functions to modify output data
-static char *text_putchar(char *next){
-    char c = *next++;
-    DBG("put 0x%02X (%c)", c, c);
-    if(c < 31 || c > 126){
-        wattron(msg_win, COLOR(MARKED));
-        //waddch(msg_win, c);
-        wprintw(msg_win, "%02X", (uint8_t)c);
-        wattroff(msg_win, COLOR(MARKED));
-    }else{
-        //wprintw(msg_win, "%c" COLOR_GREEN "green" COLOR_RED "red" COLOR_OLD, c);
-        waddch(msg_win, c);
-    }
-    return next;
-}
-static char *raw_putchar(char *next){
-    waddch(msg_win, *next);
-    return next+1;
-}
-static char *hex_putchar(char *next){
-    waddch(msg_win, *next);
-    return next+1;
-}
-#endif
-
 /**
  * @brief msg_win_redisplay - redisplay message window
  * @param group_refresh - true for grouping refresh (don't call doupdate())
+ * // called with mutex locked
  */
 static void msg_win_redisplay(bool group_refresh){
     if(!linebuffer) return;
@@ -237,20 +216,20 @@ static void show_mode(bool group_refresh){
         if(dtty){
         switch(dtty->type){
             case DEV_NETSOCKET:
-                snprintf(buf, 127, "%s HOST: %s, ENDLINE: %s, PORT: %s",
-                    insmodetext, dtty->name, dtty->seol, dtty->port);
+                snprintf(buf, 127, "%s NODE: %s, ENDLINE: %s",
+                    insmodetext, dtty->node, dtty->seol);
             break;
             case DEV_UNIXSOCKET:
-                if(*dtty->name)
+                if(*dtty->node)
                     snprintf(buf, 127, "%s PATH: %s, ENDLINE: %s",
-                        insmodetext, dtty->name, dtty->seol);
+                        insmodetext, dtty->node, dtty->seol);
                 else // name starting from \0
-                    snprintf(buf, 127, "%s PATH: \\0%s, ENDLINE: %s",
-                        insmodetext, dtty->name+1, dtty->seol);
+                    snprintf(buf, 127, "%s PATH: @%s, ENDLINE: %s",
+                        insmodetext, dtty->node+1, dtty->seol);
             break;
             case DEV_TTY:
                 snprintf(buf, 127, "%s DEV: %s, ENDLINE: %s, SPEED: %d, FORMAT: %s",
-                    insmodetext, dtty->name, dtty->seol, dtty->speed, dtty->port);
+                    insmodetext, dtty->node, dtty->seol, dtty->speed, dtty->serformat ? dtty->serformat : "8N1");
             break;
             default:
             break;
@@ -258,7 +237,7 @@ static void show_mode(bool group_refresh){
             snprintf(buf, 127, "INSERT (TAB to switch, ctrl+D to quit) NOT INITIALIZED");
         }
     }else{
-        snprintf(buf, 127, "SCROLL (F1 - help) ENDLINE: %s", dtty?dtty->seol:"n");
+        snprintf(buf, 127, "SCROLL (F1 - help) ENDLINE: %s", dtty ? dtty->seol : "n");
     }
     wattron(sep_win, COLOR(BKGMARKED));
     wprintw(sep_win, "%s ", dispnames[disp_type]);
@@ -272,6 +251,7 @@ static void show_mode(bool group_refresh){
 /**
  * @brief redisplay_addline - redisplay after line adding
  * @param group_refresh - true for grouping refresh (don't call doupdate())
+ * called with mutex locked
  */
 static void redisplay_addline(){
     // redisplay only if previous line was on screen
@@ -299,6 +279,7 @@ static void linebuf_free(){
 
 /**
  * @brief chksizes - check sizes of buffers and enlarge them if need
+ * called with locked mutex
  */
 static void chksizes(){
     size_t addportion = MAXCOLS * LINEARRSZ;
@@ -357,6 +338,7 @@ static void linebuf_new(){
 
 /**
  * @brief finalize_line - finalize last line in linebuffer & increase buffer sizes if nesessary
+ * // called when mutex locked
  */
 static void finalize_line(){
     chksizes();
@@ -476,18 +458,15 @@ void FormatData(const uint8_t *data, int len){
 }
 
 /**
- * @brief AddData - add new data buffer to global buffer and last displayed string
+ * @brief AddData - add new data to temporary ring buffer
  * @param data - data
  * @param len  - length of `data`
  */
 void AddData(const uint8_t *data, int len){
-    // now print all symbols into buff
-    chksizes();
-    memcpy(raw_buffer + rawbufcur, data, len);
-    DBG("Got %d bytes, now buffer have %d", len, rawbufcur+len);
-    FormatData(raw_buffer + rawbufcur, len);
-    rawbufcur += len;
-    redisplay_addline(); // display last symbols if can
+    while(len > 0){
+        size_t written = sl_RB_write(incoming_data, data, len);
+        len -= written;
+    }
 }
 
 static void resize(){
@@ -499,20 +478,18 @@ static void resize(){
         mvwin(sep_win, LINES - 2, 0);
         mvwin(cmd_win, LINES - 1, 0);
     }
-    pthread_mutex_lock(&dtty->mutex);
     linebuf_new(); // free old and alloc new
     FormatData(raw_buffer, rawbufcur); // reformat all data
-    pthread_mutex_unlock(&dtty->mutex);
     msg_win_redisplay(true);
     show_mode(true);
     doupdate();
 }
 /*
 void swinch(_U_ int sig){
-    //signal(SIGWINCH, swinch);
+    signal(SIGWINCH, swinch);
     DBG("got resize");
-}*/
-
+}
+*/
 void init_ncurses(){
     if (!initscr())
         fail_exit("Failed to initialize ncurses");
@@ -556,16 +533,20 @@ void init_ncurses(){
     rawbufsz = RBUFSIZ;
     raw_buffer = MALLOC(uint8_t, rawbufsz);
     linebuf_new();
+    if(!incoming_data) incoming_data = sl_RB_new(BUFSIZ);
+    if(!incoming_data) ERRX("Can't create input ring buffer");
     //signal(SIGWINCH, swinch);
 }
 
 void deinit_ncurses(){
+    FNAME();
     visual_mode = false;
-    linebuf_free();
     delwin(msg_win);
     delwin(sep_win);
     delwin(cmd_win);
     endwin();
+    linebuf_free();
+    sl_RB_delete(&incoming_data);
 }
 
 static char *previous_line = NULL; // previous line in readline input
@@ -613,6 +594,7 @@ static void change_disp(disptype in, disptype out){
 }
 
 void deinit_readline(){
+    FNAME();
     rl_callback_handler_remove();
 }
 
@@ -682,9 +664,20 @@ static const char *help[] = {
  */
 void *cmdline(void* arg){
     MEVENT event;
+    uint8_t locbuff[MAXCOLS];
     dtty = (chardevice*)arg;
     show_mode(false);
     do{
+        // check for incoming data
+        size_t got = sl_RB_read(incoming_data, locbuff, MAXCOLS);
+        if(got){
+            chksizes();
+            memcpy(raw_buffer + rawbufcur, locbuff, got);
+            DBG("Got %zd bytes, now buffer have %d", got, rawbufcur+got);
+            FormatData(raw_buffer + rawbufcur, got);
+            rawbufcur += got;
+            redisplay_addline(); // display last symbols if can
+        }
         int c = wgetch(cmd_win);
         if(c < 0) continue;
         bool processed = true;
@@ -755,7 +748,7 @@ void *cmdline(void* arg){
                 break;
                 case KEY_BACKSPACE:
                     forward_to_readline(127); // ^?
-                break;  
+                break;
                 case KEY_IC: // ^[[2~
                     DBG("key insert");
                     ptr = "2~";
@@ -808,6 +801,7 @@ void *cmdline(void* arg){
             }
         }
     }while(!should_exit);
+    DBG("should_exit == 0");
     signals(0);
     return NULL;
 }

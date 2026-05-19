@@ -16,8 +16,6 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #pragma once
-#ifndef NCURSES_AND_READLINE_H__
-#define NCURSES_AND_READLINE_H__
 
 #include "dbg.h"
 #include "ttysocket.h"
@@ -34,9 +32,9 @@ typedef enum{ // display/input data as
 
 void init_readline();
 void deinit_readline();
+void exit_writer();
 void init_ncurses();
 void deinit_ncurses();
 void *cmdline(void* arg);
 void AddData(const uint8_t *data, int len);
 
-#endif // NCURSES_AND_READLINE_H__

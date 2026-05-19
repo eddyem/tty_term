@@ -17,8 +17,6 @@
  */
 
 #pragma once
-#ifndef TTY_H__
-#define TTY_H__
 
 #include <pthread.h>
 #include <asm-generic/termbits.h>
@@ -34,9 +32,9 @@ typedef enum{ // device: tty terminal, network socket or UNIX socket
 
 typedef struct{
     devtype type;               // type
-    char *name;                 // filename (dev or UNIX socket) or server name/IP
-    sl_tty_t *dev;              // tty serial device
-    char *port;                 // port to connect
+    char *node;                 // filename (dev or UNIX socket) or server name:IP
+    char *serformat;            // serial format like "8N1"
+    int fd;                     // file descriptor
     int speed;                  // tty speed
     pthread_mutex_t mutex;      // reading/writing mutex
     char eol[3];                // end of line
@@ -44,10 +42,8 @@ typedef struct{
     int exclusive;
 } chardevice;
 
-uint8_t *ReadData(int *l);
-int SendData(const uint8_t *data, size_t len);
-void settimeout(int tms);
+ssize_t ReadData(uint8_t *buf, size_t len);
+ssize_t SendData(const uint8_t *data, size_t len);
 int opendev(chardevice *d, char *path);
 void closedev();
 
-#endif // TTY_H__

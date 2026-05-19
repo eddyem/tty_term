@@ -1,7 +1,7 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 4.0)
 set(PROJ tty_term)
 set(MINOR_VERSION "1")
-set(MID_VERSION "2")
+set(MID_VERSION "3")
 set(MAJOR_VERSION "0")
 set(VERSION "${MAJOR_VERSION}.${MID_VERSION}.${MINOR_VERSION}")
 
@@ -15,7 +15,7 @@ option(DEBUG "Compile in debug mode" OFF)
 # default flags
 set(CMAKE_C_FLAGS_RELEASE "")
 set(CMAKE_C_FLAGS_DEBUG "")
-set(CMAKE_C_FLAGS "-O3 -std=gnu99 -D_XOPEN_SOURCE=12345 -D_DEFAULT_SOURCE")
+set(CMAKE_C_FLAGS "-O3 -std=c23 -D_XOPEN_SOURCE=12345 -D_DEFAULT_SOURCE")
 
 set(CMAKE_COLOR_MAKEFILE ON)
 
@@ -36,7 +36,7 @@ endif()
 
 ###### pkgconfig ######
 # pkg-config modules (for pkg-check-modules)
-set(MODULES ncurses readline usefull_macros>=0.3.2)
+set(MODULES ncurses readline usefull_macros>=0.3.5)
 
 # find packages:
 find_package(PkgConfig REQUIRED)
